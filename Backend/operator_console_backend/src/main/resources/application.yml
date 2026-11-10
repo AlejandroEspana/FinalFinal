@@ -1,0 +1,24 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: operator_console_backend
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+app:
+  rabbitmq:
+    exchanges:
+      human-alerts: ${EXCHANGE_HUMAN_ALERTS:human_alerts}
+    queues:
+      operator-alerts: ${QUEUE_OPERATOR_ALERTS:operator_console_alerts_queue}
+
+logging:
+  level:
+    com.empresa.mantenimiento: INFO

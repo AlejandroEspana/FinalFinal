@@ -1,0 +1,7 @@
+spring:
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+
+logging:
+  level:
+    com.empresa.mantenimiento: DEBUG

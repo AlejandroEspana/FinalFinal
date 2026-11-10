@@ -1,0 +1,22 @@
+server:
+  port: ${SERVER_PORT:8086}
+
+spring:
+  application:
+    name: maintenance-worker
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:guest}
+    password: ${SPRING_RABBITMQ_PASSWORD:guest}
+
+app:
+  rabbitmq:
+    queues:
+      maintenance: maintenance_queue
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

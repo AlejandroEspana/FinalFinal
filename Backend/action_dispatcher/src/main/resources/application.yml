@@ -1,0 +1,44 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: action-dispatcher
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/mantenimiento_db}
+    username: ${SPRING_DATASOURCE_USERNAME:iot_admin}
+    password: ${SPRING_DATASOURCE_PASSWORD:iot_secret_2026}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:guest}
+    password: ${SPRING_RABBITMQ_PASSWORD:guest}
+
+app:
+  security:
+    operator-username: ${APP_OPERATOR_USER:operator}
+    operator-password: ${APP_OPERATOR_PASS:operator123}
+  maintenance:
+    delayed-millis: ${APP_DELAYED_MILLIS:10000}
+  rabbitmq:
+    queues:
+      critical-actions: critical_actions_queue
+      maintenance: maintenance_queue
+    exchanges:
+      delayed-actions: delayed_actions_exchange
+    routing-keys:
+      delayed-maintenance: maintenance_route
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

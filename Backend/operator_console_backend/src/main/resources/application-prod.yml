@@ -1,0 +1,7 @@
+spring:
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+
+logging:
+  level:
+    com.empresa.mantenimiento: INFO

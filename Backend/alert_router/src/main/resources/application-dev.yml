@@ -1,0 +1,9 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+
+logging:
+  level:
+    com.empresa.mantenimiento: DEBUG

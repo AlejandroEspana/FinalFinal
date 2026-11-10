@@ -1,0 +1,21 @@
+server:
+  port: 8089
+
+spring:
+  application:
+    name: sensor_producer
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+app:
+  simulation:
+    rate-ms: ${SIMULATION_RATE_MS:2000}
+  kafka:
+    topics:
+      sensor-data: ${TOPIC_SENSOR_DATA:sensor_data}
+
+logging:
+  level:
+    com.empresa.mantenimiento: INFO

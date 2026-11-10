@@ -1,0 +1,23 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: alert_detector
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:alert-detector-group}
+
+app:
+  kafka:
+    topics:
+      sensor-data: ${TOPIC_SENSOR_DATA:sensor_data}
+      alerts-critical: ${TOPIC_ALERTS_CRITICAL:alerts_critical}
+      alerts-warning: ${TOPIC_ALERTS_WARNING:alerts_warning}
+
+logging:
+  level:
+    com.empresa.mantenimiento: INFO

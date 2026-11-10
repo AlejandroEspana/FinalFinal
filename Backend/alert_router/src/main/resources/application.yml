@@ -1,0 +1,30 @@
+server:
+  port: 8087
+
+spring:
+  application:
+    name: alert_router
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:alert-router-group}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+
+app:
+  kafka:
+    topics:
+      alerts-critical: ${TOPIC_ALERTS_CRITICAL:alerts_critical}
+      alerts-warning: ${TOPIC_ALERTS_WARNING:alerts_warning}
+  rabbitmq:
+    exchanges:
+      human-alerts: ${EXCHANGE_HUMAN_ALERTS:human_alerts}
+
+logging:
+  level:
+    com.empresa.mantenimiento: INFO
