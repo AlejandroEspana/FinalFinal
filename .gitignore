@@ -22,3 +22,8 @@ buildNumber.properties
 .DS_Store
 Thumbs.db
 *.log
+
+# Claves SSH y credenciales (NUNCA subir a GitHub)
+*.pem
+*.ppk
+.env
