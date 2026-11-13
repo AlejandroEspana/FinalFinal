@@ -1,139 +1,73 @@
 # Guía Completa de Despliegue en la Nube: AWS EC2
 ## Plataforma de Mantenimiento Predictivo Interactivo (IoT Industrial)
 
-Esta guía detalla el procedimiento paso a paso para aprovisionar, configurar y desplegar toda la arquitectura de microservicios contenerizados (Kafka, RabbitMQ, PostgreSQL, Java Spring Boot y Nginx) sobre una máquina virtual en **Amazon Web Services (AWS)**.
+Esta guía detalla el procedimiento paso a paso para aprovisionar, configurar y desplegar toda la arquitectura de microservicios contenerizados (Kafka, RabbitMQ, PostgreSQL 16, 8 microservicios Java Spring Boot y Frontend Nginx) sobre **Amazon Web Services (AWS EC2)**.
 
 ---
 
 ## 1. Dimensionamiento de la Instancia EC2
 
-Dado que la plataforma orquesta **12+ contenedores simultáneos** (Zookeeper, Kafka, RabbitMQ, PostgreSQL, 6 microservicios Spring Boot, 4 workers en réplica y Nginx) con cuotas de recursos asignadas (`deploy.resources.limits`), se recomienda el siguiente tipo de instancia:
+Dado que la plataforma orquesta **15 contenedores simultáneos** (Zookeeper, Kafka, RabbitMQ, PostgreSQL, 6 microservicios Spring Boot centrales, 4 réplicas de workers y Nginx) con cuotas de recursos asignadas (`deploy.resources.limits`), se recomienda:
 
-| Parámetro | Valor Recomendado | Valor Mínimo para Pruebas |
+| Parámetro | Valor Recomendado | Valor Mínimo (con Swap 4GB incluido en script) |
 |---|---|---|
-| **Tipo de Instancia** | `t3.xlarge` (o `c6i.xlarge` / `m6i.xlarge`) | `t3.large` |
+| **Tipo de Instancia** | `t3.xlarge` | `t3.large` (8 GB RAM) |
 | **vCPU** | 4 vCPU | 2 vCPU |
-| **Memoria RAM** | 16 GB RAM | 8 GB RAM (ajustando réplicas a 1) |
-| **Almacenamiento** | 40 GB gp3 SSD | 30 GB gp3 SSD |
-| **Sistema Operativo** | Ubuntu Server 22.04 LTS o 24.04 LTS | Ubuntu Server 22.04 LTS |
-
-> **Nota:** La instancia `t3.xlarge` garantiza que los límites ergonómicos de la JVM (`MaxRAMPercentage=75%`) y los recolectores de basura operen sin saturar el host ante flujos masivos de telemetría.
+| **Memoria RAM** | 16 GB RAM | 8 GB RAM |
+| **Almacenamiento** | 35 GB gp3 SSD | 25 GB gp3 SSD |
+| **Sistema Operativo** | Ubuntu Server 24.04 LTS / 22.04 LTS | Ubuntu Server 22.04 LTS |
 
 ---
 
 ## 2. Configuración del Grupo de Seguridad (Security Group) en AWS
 
-En la consola de AWS EC2, cree un **Security Group** con las siguientes reglas de entrada (**Inbound Rules**):
+En la consola de AWS EC2, configura el **Security Group** con las siguientes reglas de entrada (**Inbound Rules**):
 
-| Tipo | Protocolo | Rango de Puertos | Origen | Propósito |
+| Tipo | Protocolo | Puerto | Origen | Propósito |
 |---|---|---|---|---|
-| **SSH** | TCP | `22` | Tu IP Pública (`Mi IP`) | Acceso seguro a la terminal |
-| **Custom TCP** | TCP | `3000` | `0.0.0.0/0` | SCADA Dashboard (Frontend Nginx) |
-| **Custom TCP** | TCP | `8080` | `0.0.0.0/0` | API REST action_dispatcher (Spring Security) |
-| **Custom TCP** | TCP | `8081` | `0.0.0.0/0` | WebSocket plant_monitor_backend |
-| **Custom TCP** | TCP | `8082` | `0.0.0.0/0` | WebSocket operator_console_backend |
-| **Custom TCP** | TCP | `15672` | Tu IP Pública (`Mi IP`) | Consola de Administración RabbitMQ |
+| **SSH** | TCP | `22` | `Mi IP` | Acceso seguro por consola SSH |
+| **Custom TCP** | TCP | `3000` | `0.0.0.0/0` | SCADA Dashboard Web (Frontend Nginx) |
+| **Custom TCP** | TCP | `8080` | `0.0.0.0/0` | `action_dispatcher` API REST + Auditoría PostgreSQL |
+| **Custom TCP** | TCP | `8081` | `0.0.0.0/0` | WebSocket `plant_monitor_backend` (`/ws-plant`) |
+| **Custom TCP** | TCP | `8082` | `0.0.0.0/0` | WebSocket `operator_console_backend` (`/ws-alerts`) |
+| **Custom TCP** | TCP | `8089` | `0.0.0.0/0` | Inyector de Telemetría `sensor_producer` |
+| **Custom TCP** | TCP | `8091` | `0.0.0.0/0` | Historial `actuator_worker` |
+| **Custom TCP** | TCP | `8093` | `0.0.0.0/0` | Tickets `maintenance_worker` |
+| **Custom TCP** | TCP | `15672` | `Mi IP` | Consola de Administración RabbitMQ |
 
-> **Seguridad:** Los puertos internos de infraestructura (`9092` Kafka, `5672` RabbitMQ AMQP, `5432` PostgreSQL, `2181` Zookeeper) **NO** deben exponerse públicamente hacia Internet; se comunican de forma aislada a través de la red virtual de Docker (`industrial_iot_net`).
+> **Seguridad:** Los puertos internos de infraestructura (`9092` Kafka, `5672` RabbitMQ AMQP, `5432` PostgreSQL, `2181` Zookeeper) permanecen cerrados a Internet y solo se comunican dentro de la red privada `iot_industrial_net` de Docker.
 
 ---
 
-## 3. Conexión y Clonación del Repositorio
+## 3. Conexión SSH y Clonación desde GitHub
 
-1. Conéctese a su instancia EC2 vía SSH usando su archivo de llave privada `.pem`:
+1. Conéctate a tu instancia EC2 vía SSH:
    ```bash
-   ssh -i "su-llave.pem" ubuntu@<IP_PUBLICA_EC2>
+   ssh -i "tu-llave.pem" ubuntu@<IP_PUBLICA_EC2>
    ```
 
-2. Transfiera o clone el código fuente en el directorio principal:
+2. Clona directamente tu repositorio de GitHub:
    ```bash
-   git clone <URL_DE_SU_REPOSITORIO> ~/TrabajoFinalPoo_SD_SO
-   cd ~/TrabajoFinalPoo_SD_SO
+   git clone https://github.com/AlejandroEspana/FinalFinal.git
+   cd FinalFinal
+   ```
+
+3. Ejecuta el instalador automatizado:
+   ```bash
+   chmod +x aws/deploy-aws.sh
+   ./aws/deploy-aws.sh
    ```
 
 ---
 
-## 4. Despliegue Automatizado con un Solo Comando
+## 4. Comandos Útiles de Verificación en AWS EC2
 
-Ejecute el script de aprovisionamiento automatizado:
-```bash
-chmod +x aws/deploy-aws.sh
-./aws/deploy-aws.sh
-```
-
-El script se encargará automáticamente de:
-- Actualizar dependencias del sistema operativo Ubuntu.
-- Configurar límites del kernel para Kafka (`vm.max_map_count=262144`).
-- Instalar Docker Engine y el plugin Docker Compose oficial.
-- Configurar el firewall local (UFW).
-- Compilar las imágenes Docker multietapa en paralelo y levantar la arquitectura completa.
-
----
-
-## 5. Verificación del Estado del Clúster en AWS
-
-Una vez finalizado el script, verifique que todos los contenedores y réplicas se encuentren en estado `healthy` o `Up`:
-
-```bash
-docker compose ps
-```
-
-Salida esperada:
-```text
-NAME                       IMAGE                             STATUS                   PORTS
-action-dispatcher          trabajofinalpoo_sd_so-action-dispatcher    Up (healthy)             0.0.0.0:8080->8080/tcp
-actuator-worker-1          trabajofinalpoo_sd_so-actuator-worker      Up                       8085/tcp
-actuator-worker-2          trabajofinalpoo_sd_so-actuator-worker      Up                       8085/tcp
-alert-detector             trabajofinalpoo_sd_so-alert-detector       Up                       8088/tcp
-alert-router               trabajofinalpoo_sd_so-alert-router         Up                       8087/tcp
-frontend-scada             nginx:alpine                               Up                       0.0.0.0:3000->80/tcp
-kafka                      confluentinc/cp-kafka:7.5.0               Up (healthy)             0.0.0.0:9092->9092/tcp
-maintenance-worker-1       trabajofinalpoo_sd_so-maintenance-worker   Up                       8086/tcp
-maintenance-worker-2       trabajofinalpoo_sd_so-maintenance-worker   Up                       8086/tcp
-operator-console-backend   trabajofinalpoo_sd_so-operator-console-backend Up                   0.0.0.0:8082->8082/tcp
-plant-monitor-backend      trabajofinalpoo_sd_so-plant-monitor-backend   Up                   0.0.0.0:8081->8081/tcp
-postgres-db                postgres:16-alpine                         Up (healthy)             0.0.0.0:5432->5432/tcp
-rabbitmq                   trabajofinalpoo_sd_so-rabbitmq             Up (healthy)             0.0.0.0:5672->5672/tcp, 0.0.0.0:15672->15672/tcp
-sensor-producer            trabajofinalpoo_sd_so-sensor-producer      Up                       8089/tcp
-zookeeper                  confluentinc/cp-zookeeper:7.5.0           Up                       2181/tcp
-```
-
----
-
-## 6. Acceso al Frontend y Prueba Operativa
-
-1. Abra su navegador web e ingrese a:
-   ```text
-   http://<IP_PUBLICA_EC2>:3000/dashboard.html
-   ```
-2. Observe en tiempo real:
-   - La telemetría continua de los 10 sensores consumidos desde **Apache Kafka**.
-   - La activación de las alertas interactivas cuando se superan los umbrales (Crítico > 90 o Advertencia > 75 x3) mediante **RabbitMQ Fanout Exchange**.
-   - La pulsación de los botones de acción (`APAGADO_INMEDIATO`, `PROGRAMAR_MANTENIMIENTO_AHORA`, `RECONOCER_Y_ESPERAR_24H`), enviando la petición asegurada con **Spring Security** al endpoint `/api/v1/decide`.
-   - La persistencia transaccional inmediata en **PostgreSQL** y la delegación asíncrona a los workers correspondientes (`actuator_worker` o `maintenance_worker`).
-
----
-
-## 7. Comandos de Operación y Diagnóstico
-
-- **Ver logs en tiempo real de un microservicio:**
+- **Ver estado de los 15 contenedores:**
   ```bash
-  docker compose logs -f action-dispatcher
-  docker compose logs -f actuator-worker
-  docker compose logs -f maintenance-worker
+  sudo docker compose ps
   ```
 
-- **Inspeccionar registros de auditoría en PostgreSQL:**
+- **Consultar directamente la tabla de auditoría en PostgreSQL 16:**
   ```bash
-  docker compose exec postgres-db psql -U postgres -d predictive_db -c "SELECT id, alert_id, sensor_id, chosen_action, routing_target, recorded_at FROM operator_decision_audit ORDER BY id DESC LIMIT 10;"
-  ```
-
-- **Detener la plataforma:**
-  ```bash
-  docker compose down
-  ```
-
-- **Detener y limpiar volúmenes de datos:**
-  ```bash
-  docker compose down -v
+  sudo docker compose exec postgres psql -U iot_admin -d mantenimiento_db -c "SELECT id, alert_id, sensor_id, chosen_action, status, routing_target, delay_millis, recorded_at FROM operator_decision_audit ORDER BY id DESC LIMIT 10;"
   ```
