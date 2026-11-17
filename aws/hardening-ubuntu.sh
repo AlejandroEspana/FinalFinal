@@ -230,6 +230,102 @@ sudo systemctl enable --now auditd || true
 sudo find / -xdev -perm -4000 -type f 2>/dev/null > /home/ubuntu/suid_baseline.txt || true
 sudo find / -xdev -perm -2000 -type f 2>/dev/null >> /home/ubuntu/suid_baseline.txt || true
 
+# -----------------------------------------------------------------------------
+# FASE 7: Servicio Systemd Confinado para Puente Amazon SNS (Diapositivas 9, 44 y 106)
+# -----------------------------------------------------------------------------
+echo "☁️ [Fase 7] Configurando servicio systemd confinado (scada-sns-bridge.service)..."
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-boto3 > /dev/null 2>&1
+
+cat << 'EOF' | sudo tee /usr/local/sbin/scada-sns-bridge.py > /dev/null
+#!/usr/bin/env python3
+import json
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import boto3
+
+def get_region():
+    try:
+        req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            method="PUT",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
+        )
+        token = urllib.request.urlopen(req, timeout=2).read().decode()
+        req2 = urllib.request.Request(
+            "http://169.254.169.254/latest/meta-data/placement/region",
+            headers={"X-aws-ec2-metadata-token": token}
+        )
+        return urllib.request.urlopen(req2, timeout=2).read().decode().strip()
+    except Exception:
+        return "us-east-2"
+
+REGION = get_region()
+session = boto3.Session(region_name=REGION)
+sns = session.client("sns")
+TOPIC_ARN = sns.create_topic(Name="scada-iot-alertas-ucc")["TopicArn"]
+
+class SnsBridgeHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/publish":
+            self.send_response(404)
+            self.end_headers()
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length).decode("utf-8")
+            data = json.loads(raw) if raw else {}
+            subject = str(data.get("subject", "Alerta SCADA IoT Industrial"))[:99]
+            message = str(data.get("message", "Notificacion del sistema SCADA"))
+            res = sns.publish(TopicArn=TOPIC_ARN, Subject=subject, Message=message)
+            body = json.dumps({"status": "OK", "messageId": res.get("MessageId"), "topicArn": TOPIC_ARN}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            err = json.dumps({"status": "ERROR", "detail": str(e)}).encode("utf-8")
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(err)
+
+if __name__ == "__main__":
+    HTTPServer(("0.0.0.0", 9099), SnsBridgeHandler).serve_forever()
+EOF
+sudo chmod 755 /usr/local/sbin/scada-sns-bridge.py
+
+cat << 'EOF' | sudo tee /etc/systemd/system/scada-sns-bridge.service > /dev/null
+[Unit]
+Description=Puente Confinado Amazon SNS para Plataforma SCADA IoT (IMDSv2)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/sbin/scada-sns-bridge.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+MemoryMax=128M
+CPUQuota=50%
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Permitir tráfico desde la subred interna de Docker hacia el puerto local 9099
+sudo ufw allow from 172.16.0.0/12 to any port 9099 proto tcp comment 'Docker internal to SNS bridge' || true
+sudo systemctl daemon-reload
+sudo systemctl enable --now scada-sns-bridge.service
+sudo systemctl restart scada-sns-bridge.service
+
 echo "========================================================================"
 echo "✅ HARDENING DE UBUNTU SERVER COMPLETADO CON ÉXITO"
 echo "========================================================================"

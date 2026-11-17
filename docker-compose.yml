@@ -175,6 +175,8 @@ services:
       RABBITMQ_PASS: ${RABBITMQ_PASS:-iot_rabbit_2026}
       SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-iot_rabbit}
       SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASS:-iot_rabbit_2026}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:
@@ -264,6 +266,8 @@ services:
       APP_OPERATOR_PASS: ${APP_OPERATOR_PASS:-operator123}
       APP_ADMIN_USER: ${APP_ADMIN_USER:-admin}
       APP_ADMIN_PASS: ${APP_ADMIN_PASS:-admin123}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:

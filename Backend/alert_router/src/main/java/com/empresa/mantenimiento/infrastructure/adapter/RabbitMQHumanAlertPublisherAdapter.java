@@ -17,13 +17,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Adaptador RabbitMQ que publica en el Fanout Exchange 'human_alerts' y dispara alerta móvil/email
- * con control de tasa (cooldown de 60s) para no saturar al operador.
+ * Adaptador RabbitMQ que publica en el Fanout Exchange 'human_alerts' y dispara alerta a Amazon SNS
+ * y Push móvil con control de tasa (cooldown de 60s) para no saturar al operador.
  */
 @Component
 public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPort {
@@ -61,7 +62,7 @@ public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPo
                 long now = System.currentTimeMillis();
                 long prev = lastExternalNotificationAt.get();
                 if (now - prev >= NOTIFICATION_COOLDOWN_MS && lastExternalNotificationAt.compareAndSet(prev, now)) {
-                    CompletableFuture.runAsync(() -> sendCriticalAlertPushAndEmail(request));
+                    CompletableFuture.runAsync(() -> sendCriticalAlertToSnsAndPush(request));
                 }
             }
         } catch (JsonProcessingException e) {
@@ -69,31 +70,43 @@ public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPo
         }
     }
 
-    private void sendCriticalAlertPushAndEmail(HumanActionRequest request) {
+    private void sendCriticalAlertToSnsAndPush(HumanActionRequest request) {
+        String subject = "ALERTA CRITICA SCADA IoT: " + request.sensorId().value() + " (" + request.alertId().value() + ")";
+        String msg = String.format(
+                "🚨 ALERTA CRÍTICA DETECTADA EN PLANTA INDUSTRIAL (UCC)\n" +
+                "• ID Alerta: %s\n" +
+                "• Sensor: %s (%.2f mm/s RMS)\n" +
+                "• Detalle: %s\n" +
+                "• Opciones: %s\n" +
+                "• Consola SCADA AWS: http://scada-ucc-alejandro.77.113.90.86.sslip.io:3000",
+                request.alertId().value(),
+                request.sensorId().value(),
+                request.triggerValue(),
+                request.description(),
+                request.availableOptions()
+        );
         try {
-            String msg = String.format(
-                    "🚨 ALERTA CRÍTICA DETECTADA EN PLANTA\n" +
-                    "• Alerta: %s\n" +
-                    "• Sensor: %s (%.2f mm/s RMS)\n" +
-                    "• Detalle: %s\n" +
-                    "• Opciones: %s\n" +
-                    "• Consola SCADA: https://scada-ucc-alejandro.77.113.90.86.sslip.io",
-                    request.alertId().value(),
-                    request.sensorId().value(),
-                    request.triggerValue(),
-                    request.description(),
-                    request.availableOptions()
-            );
-            HttpRequest httpReq = HttpRequest.newBuilder()
+            String snsJson = objectMapper.writeValueAsString(Map.of("subject", subject, "message", msg));
+            HttpRequest snsReq = HttpRequest.newBuilder()
+                    .uri(URI.create("http://host.docker.internal:9099/publish"))
+                    .timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(snsJson, StandardCharsets.UTF_8))
+                    .build();
+            httpClient.send(snsReq, HttpResponse.BodyHandlers.discarding());
+        } catch (Exception ignored) {
+        }
+
+        try {
+            HttpRequest pushReq = HttpRequest.newBuilder()
                     .uri(URI.create("https://ntfy.sh/scada-ucc-alejandro-573154613867"))
                     .timeout(Duration.ofSeconds(5))
-                    .header("Title", "ALERTA CRITICA IoT: " + request.sensorId().value())
+                    .header("Title", subject)
                     .header("Priority", "urgent")
                     .header("Tags", "rotating_light,warning")
-                    .header("X-Email", "alejandro.espaname@campusucc.edu.co")
                     .POST(HttpRequest.BodyPublishers.ofString(msg, StandardCharsets.UTF_8))
                     .build();
-            httpClient.send(httpReq, HttpResponse.BodyHandlers.discarding());
+            httpClient.send(pushReq, HttpResponse.BodyHandlers.discarding());
         } catch (Exception ignored) {
         }
     }

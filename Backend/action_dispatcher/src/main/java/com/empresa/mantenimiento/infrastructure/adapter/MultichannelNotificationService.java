@@ -2,6 +2,8 @@ package com.empresa.mantenimiento.infrastructure.adapter;
 
 import com.empresa.mantenimiento.application.dto.DecisionResultDto;
 import com.empresa.mantenimiento.application.dto.NotificationRecordDto;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,7 +25,10 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Adaptador Multicanal de Notificaciones Industriales (Push Móvil ntfy.sh + Correo Institucional + WhatsApp).
+ * Adaptador Multicanal de Notificaciones Industriales:
+ * 1) Amazon SNS Oficial (arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc) -> Email + SMS
+ * 2) Push Móvil en Tiempo Real (ntfy.sh)
+ * 3) Enlace Directo a WhatsApp (+573154613867)
  */
 @Service
 public class MultichannelNotificationService {
@@ -34,28 +39,33 @@ public class MultichannelNotificationService {
     private volatile String targetEmail;
     private volatile String targetPhone;
     private volatile String ntfyTopic;
+    private volatile String snsBridgeUrl;
     private volatile boolean notificationsEnabled;
 
     private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
     private final List<NotificationRecordDto> history = new CopyOnWriteArrayList<>();
 
     public MultichannelNotificationService(
             @Value("${app.notifications.email:alejandro.espaname@campusucc.edu.co}") String targetEmail,
             @Value("${app.notifications.phone:+573154613867}") String targetPhone,
             @Value("${app.notifications.ntfy-topic:scada-ucc-alejandro-573154613867}") String ntfyTopic,
+            @Value("${app.notifications.sns-bridge-url:http://host.docker.internal:9099/publish}") String snsBridgeUrl,
             @Value("${app.notifications.enabled:true}") boolean notificationsEnabled
     ) {
         this.targetEmail = targetEmail;
         this.targetPhone = targetPhone;
         this.ntfyTopic = ntfyTopic;
+        this.snsBridgeUrl = snsBridgeUrl;
         this.notificationsEnabled = notificationsEnabled;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
+        this.objectMapper = new ObjectMapper();
     }
 
     public NotificationRecordDto notifyOperatorDecision(DecisionResultDto decision, String operatorId, String notes) {
-        String subject = String.format("SCADA IoT [%s] -> %s en %s",
+        String subject = String.format("SCADA IoT [%s] -> %s (%s)",
                 decision.actionDispatched(), decision.sensorId(), decision.alertId());
         String body = String.format(
                 "🚨 [PLATAFORMA SCADA IoT INDUSTRIAL - UCC]\n" +
@@ -65,7 +75,8 @@ public class MultichannelNotificationService {
                 "• Operador Autenticado: %s\n" +
                 "• Cola RabbitMQ: %s\n" +
                 "• ID Auditoría PostgreSQL: #%d\n" +
-                "• Notas: %s",
+                "• Notas: %s\n" +
+                "• Consola AWS: http://scada-ucc-alejandro.77.113.90.86.sslip.io:3000",
                 decision.alertId(),
                 decision.sensorId(),
                 decision.actionDispatched(),
@@ -78,18 +89,19 @@ public class MultichannelNotificationService {
     }
 
     public NotificationRecordDto sendTestNotification(String customMessage) {
-        String subject = "Prueba de Alerta Multicanal SCADA IoT (AWS EC2)";
+        String subject = "SCADA IoT UCC - Alerta Amazon SNS + Push Movil Activa";
         String body = (customMessage != null && !customMessage.isBlank())
                 ? customMessage
                 : String.format(
-                        "✅ [PRUEBA DE CONECTIVIDAD SCADA IoT - AWS EC2]\n" +
-                        "• Destinatario Email: %s\n" +
-                        "• Móvil / WhatsApp: %s\n" +
+                        "✅ [PRUEBA OFICIAL AMAZON SNS + PUSH SCADA IoT - AWS EC2]\n" +
+                        "• Tópico AWS SNS: arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc\n" +
+                        "• Destinatario Email SNS: %s\n" +
+                        "• Móvil / SMS / WhatsApp: %s\n" +
                         "• Canal Push Tiempo Real: https://ntfy.sh/%s\n" +
-                        "• Estado del Clúster: 15 contenedores activos (Kafka + RabbitMQ + PostgreSQL)",
+                        "• Dominio SCADA: http://scada-ucc-alejandro.77.113.90.86.sslip.io:3000",
                         targetEmail, targetPhone, ntfyTopic
                 );
-        return dispatchNotification(subject, body, "MANUAL_TEST");
+        return dispatchNotification(subject, body, "AWS_SNS_TEST");
     }
 
     private NotificationRecordDto dispatchNotification(String subject, String body, String tagType) {
@@ -98,53 +110,61 @@ public class MultichannelNotificationService {
         String pushUrl = "https://ntfy.sh/" + ntfyTopic;
         String notifId = "NOTIF-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 
-        String status = "DELIVERED_PUSH_AND_QUEUED";
+        List<String> statuses = new ArrayList<>();
+
         if (notificationsEnabled) {
+            // 1. Publicar en Amazon SNS oficial a través del puente systemd con rol IAM ec2-scada-sns-role
             try {
-                HttpRequest.Builder reqBuilder = HttpRequest.newBuilder()
-                        .uri(URI.create(pushUrl))
-                        .timeout(Duration.ofSeconds(6))
-                        .header("Title", subject)
-                        .header("Priority", "high")
-                        .header("Tags", "warning,factory,rotating_light")
-                        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
-
-                if (targetEmail != null && targetEmail.contains("@")) {
-                    reqBuilder.header("X-Email", targetEmail);
-                }
-
-                HttpResponse<String> response = httpClient.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                    status = "SENT_OK (HTTP " + response.statusCode() + ")";
-                    log.info("Notificación enviada a {} y {}: {}", targetEmail, targetPhone, status);
-                } else {
-                    // Reintento sin cabecera X-Email si el servidor ntfy limita cuota de correo anónimo
-                    HttpRequest fallbackReq = HttpRequest.newBuilder()
-                            .uri(URI.create(pushUrl))
-                            .timeout(Duration.ofSeconds(6))
-                            .header("Title", subject)
-                            .header("Priority", "high")
-                            .header("Tags", "warning,factory")
-                            .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                            .build();
-                    HttpResponse<String> fallbackRes = httpClient.send(fallbackReq, HttpResponse.BodyHandlers.ofString());
-                    status = "PUSH_DELIVERED (HTTP " + fallbackRes.statusCode() + ")";
+                String jsonPayload = objectMapper.writeValueAsString(Map.of(
+                        "subject", subject,
+                        "message", body
+                ));
+                HttpRequest snsReq = HttpRequest.newBuilder()
+                        .uri(URI.create(snsBridgeUrl))
+                        .timeout(Duration.ofSeconds(5))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(jsonPayload, StandardCharsets.UTF_8))
+                        .build();
+                HttpResponse<String> snsRes = httpClient.send(snsReq, HttpResponse.BodyHandlers.ofString());
+                if (snsRes.statusCode() >= 200 && snsRes.statusCode() < 300) {
+                    JsonNode node = objectMapper.readTree(snsRes.body());
+                    String msgId = node.path("messageId").asText("OK");
+                    statuses.add("AWS_SNS_OK(" + msgId.substring(0, Math.min(8, msgId.length())) + ")");
                 }
             } catch (Exception e) {
-                log.warn("No se pudo contactar gateway push externo: {}", e.getMessage());
-                status = "LOGGED_LOCAL_GATEWAY";
+                log.debug("Puente AWS SNS local no disponible en este entorno: {}", e.getMessage());
+            }
+
+            // 2. Publicar en canal Push móvil en tiempo real (ntfy.sh)
+            try {
+                HttpRequest pushReq = HttpRequest.newBuilder()
+                        .uri(URI.create(pushUrl))
+                        .timeout(Duration.ofSeconds(5))
+                        .header("Title", subject)
+                        .header("Priority", "high")
+                        .header("Tags", "warning,factory")
+                        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                        .build();
+                HttpResponse<String> pushRes = httpClient.send(pushReq, HttpResponse.BodyHandlers.ofString());
+                if (pushRes.statusCode() >= 200 && pushRes.statusCode() < 300) {
+                    statuses.add("PUSH_OK");
+                }
+            } catch (Exception e) {
+                log.warn("No se pudo contactar ntfy.sh: {}", e.getMessage());
             }
         } else {
-            status = "PAUSED_BY_OPERATOR";
+            statuses.add("PAUSED");
         }
+
+        String finalStatus = statuses.isEmpty() ? "QUEUED_LOCAL" : String.join(" + ", statuses);
 
         NotificationRecordDto record = new NotificationRecordDto(
                 notifId,
-                "PUSH_MOVIL + EMAIL (" + tagType + ")",
+                "AWS_SNS + PUSH + WHATSAPP (" + tagType + ")",
                 targetPhone + " / " + targetEmail,
                 subject,
                 body,
-                status,
+                finalStatus,
                 whatsappUrl,
                 pushUrl,
                 Instant.now()
