@@ -9,11 +9,12 @@ Este documento describe la arquitectura física y lógica de despliegue en **Ama
 ```mermaid
 flowchart TB
     subgraph INTERNET["🌐 Red Pública / Internet"]
-        USER["💻 Navegador del Operador SCADA\nhttps://scada-ucc-alejandro.77.113.90.86.sslip.io"]
+        USER["💻 Navegador del Operador SCADA\nhttps://dnzhr4v1oxvn7.cloudfront.net"]
         EMAIL["📧 Correo Institucional & Móvil\nalejandro.espaname@campusucc.edu.co\n+573154613867"]
     end
 
     subgraph AWS_CLOUD["☁️ Amazon Web Services — Región us-east-2 (Capa Gratuita)"]
+        CF_EDGE["🌍 Amazon CloudFront CDN + AWS Native TLS 1.2/1.3 (E2EU8NOYSSDYW6)\nDominio Limpio sin IPs ni Puertos: dnzhr4v1oxvn7.cloudfront.net\nCertificado Oficial: Amazon Trust Services (ACM)"]
         SG["🛡️ AWS Security Group (launch-wizard-1)\nInbound permitido: TCP 80 (HTTP), TCP 443 (HTTPS), TCP 22 (SSH)\nBloqueados al exterior: 5432, 9092, 5672, 15672, 8080-8094"]
 
         subgraph EC2["🖥️ Instancia AWS EC2 — Ubuntu Server 24.04 LTS (77.113.90.86)"]
@@ -55,7 +56,8 @@ flowchart TB
     end
 
     %% Conexiones externas
-    USER ==>|"HTTPS (TLS 1.2/1.3) / WSS"| SG
+    USER ==>|"HTTPS (AWS TLS 1.3) / WSS"| CF_EDGE
+    CF_EDGE ==>|"Origin Proxy"| SG
     SG ==> UFW
     UFW ==> NGINX
 

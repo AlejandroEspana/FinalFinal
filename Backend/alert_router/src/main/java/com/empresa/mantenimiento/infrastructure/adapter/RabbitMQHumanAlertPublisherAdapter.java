@@ -115,8 +115,8 @@ public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPo
                 "2. PROTOCOLOS DE MITIGACIÓN HABILITADOS EN CONSOLA\n" +
                 "   • Opciones Disponibles     : %s\n\n" +
                 "----------------------------------------------------------------------\n" +
-                "INGRESE AL GEMELO DIGITAL 3D PARA AUTORIZAR LA MANIOBRA:\n" +
-                "https://scada-ucc-alejandro.77.113.90.86.sslip.io\n" +
+                "INGRESE AL GEMELO DIGITAL 3D PARA AUTORIZAR LA MANIOBRA (AWS CLOUDFRONT):\n" +
+                "https://dnzhr4v1oxvn7.cloudfront.net\n" +
                 "----------------------------------------------------------------------\n",
                 request.alertId().value(),
                 sensorId,

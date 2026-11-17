@@ -42,23 +42,14 @@ chmod +x aws/hardening-ubuntu.sh
 ./aws/hardening-ubuntu.sh
 ```
 
-### Paso 1.4: Emisión del Certificado TLS e Importación en AWS Certificate Manager (ACM)
-```bash
-# Emitir certificado TLS firmado por Let's Encrypt para el dominio y recargar Nginx
-sudo docker exec iot_frontend_dashboard sh -c 'apk add --no-cache certbot && \
-  certbot certonly --webroot -w /usr/share/nginx/html \
-  -d scada-ucc-alejandro.77.113.90.86.sslip.io \
-  --non-interactive --agree-tos -m alejandro.espaname@campusucc.edu.co && \
-  cp /etc/letsencrypt/live/scada-ucc-alejandro.77.113.90.86.sslip.io/fullchain.pem /etc/nginx/ssl/scada.crt && \
-  cp /etc/letsencrypt/live/scada-ucc-alejandro.77.113.90.86.sslip.io/privkey.pem /etc/nginx/ssl/scada.key && \
-  nginx -s reload'
+### Paso 1.4: Creación de Distribución Amazon CloudFront (Dominio AWS sin IPs ni Puertos + TLS Nativo de Amazon) y Registro en AWS ACM
+Para ocultar por completo la dirección IP pública de la instancia EC2 y utilizar el certificado SSL/TLS nativo de **Amazon Trust Services**, se aprovisionó la distribución oficial **Amazon CloudFront (`E2EU8NOYSSDYW6`)**:
+* **URL Oficial de Producción (Sin IPs ni Puertos)**: `https://dnzhr4v1oxvn7.cloudfront.net`
+* **ARN Certificado en AWS ACM**: `arn:aws:acm:us-east-2:148395526595:certificate/3dd292c0-59c8-41e1-bc78-c3eccfdf5597`
 
-# Persistir certificado en el host e importarlo oficialmente en AWS Certificate Manager (ACM)
-sudo mkdir -p /etc/scada-ssl
-sudo docker cp iot_frontend_dashboard:/etc/nginx/ssl/scada.crt /etc/scada-ssl/scada.crt
-sudo docker cp iot_frontend_dashboard:/etc/nginx/ssl/scada.key /etc/scada-ssl/scada.key
-sudo chmod 600 /etc/scada-ssl/scada.key
-sudo /usr/bin/python3 /usr/local/sbin/register-acm-cert.py
+```bash
+# Verificar el estado de la distribución Amazon CloudFront desde la VM
+python3 -c "import boto3; d=boto3.client('cloudfront').get_distribution(Id='E2EU8NOYSSDYW6')['Distribution']; print(d['DomainName'], d['Status'])"
 ```
 
 ### Paso 1.5: Verificación del Auto-Deploy Continuo (GitOps Sincronizado con la Rama `main` de GitHub)

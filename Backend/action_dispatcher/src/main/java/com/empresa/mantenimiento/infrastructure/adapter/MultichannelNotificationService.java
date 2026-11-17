@@ -108,8 +108,8 @@ public class MultichannelNotificationService {
                 "   • ID Registro PostgreSQL     : #%d (Tabla operator_decision_audit)\n" +
                 "   • Estado de Transacción      : CONFIRMADA (COMMIT EXITOSO + BACKUP S3)\n\n" +
                 "----------------------------------------------------------------------\n" +
-                "ACCESO DIRECTO AL GEMELO DIGITAL 3D Y CONSOLA SCADA:\n" +
-                "https://scada-ucc-alejandro.77.113.90.86.sslip.io\n" +
+                "ACCESO DIRECTO AL GEMELO DIGITAL 3D Y CONSOLA SCADA (AWS CLOUDFRONT):\n" +
+                "https://dnzhr4v1oxvn7.cloudfront.net\n" +
                 "----------------------------------------------------------------------\n" +
                 "Boletín emitido automáticamente mediante Amazon SNS (AWS Cloud Infrastructure).\n",
                 targetEmail,
@@ -149,8 +149,8 @@ public class MultichannelNotificationService {
                         "   • Respaldo Criptográfico          : PostgreSQL SHA-256 + Réplica AWS S3\n" +
                         "   • Tópico Oficial Amazon SNS       : arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc\n\n" +
                         "----------------------------------------------------------------------\n" +
-                        "ACCESO AL PANEL DE CONTROL Y MODELO 3D DEL EDIFICIO:\n" +
-                        "https://scada-ucc-alejandro.77.113.90.86.sslip.io\n" +
+                        "ACCESO AL PANEL DE CONTROL Y MODELO 3D DEL EDIFICIO (AWS CLOUDFRONT):\n" +
+                        "https://dnzhr4v1oxvn7.cloudfront.net\n" +
                         "----------------------------------------------------------------------\n",
                         formattedDate, targetEmail, targetPhone
                 );
