@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Script de Hardening Integral de Ubuntu Server 24.04 LTS en AWS EC2
-# Basado en la Guía de Seguridad en Servidores (Defensa en Profundidad)
+# Basado en la Guia de Seguridad en Servidores (Defensa en Profundidad)
 # =============================================================================
 
 set -e
 
 echo "========================================================================"
-echo "🛡️ APLICANDO HARDENING DE SISTEMAS OPERATIVOS EN UBUNTU SERVER (AWS EC2)"
+echo "[INICIO] APLICANDO HARDENING DE SISTEMAS OPERATIVOS EN UBUNTU SERVER"
 echo "========================================================================"
 
 # -----------------------------------------------------------------------------
-# FASE 1: Actualizaciones Automáticas (unattended-upgrades + needrestart)
+# FASE 1: Actualizaciones Automaticas (unattended-upgrades + needrestart)
 # -----------------------------------------------------------------------------
-echo "📦 [Fase 1] Configurando unattended-upgrades, needrestart y herramientas..."
+echo "[Fase 1] Configurando unattended-upgrades, needrestart y herramientas..."
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
     unattended-upgrades apt-listchanges needrestart \
     libpam-pwquality fail2ban auditd audispd-plugins \
-    sysstat htop btop iotop-c ncdu lsof lynis ufw
+    sysstat htop btop iotop-c ncdu lsof lynis ufw python3-boto3
 
 cat << 'EOF' | sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null
 APT::Periodic::Update-Package-Lists "1";
@@ -28,14 +28,14 @@ EOF
 # -----------------------------------------------------------------------------
 # FASE 2: Blindaje de SSH, Banner Legal, Sudo y PAM (pwquality + faillock)
 # -----------------------------------------------------------------------------
-echo "🔐 [Fase 2] Configurando Banner Legal (/etc/issue.net), SSH, Sudo y PAM..."
+echo "[Fase 2] Configurando Banner Legal (/etc/issue.net), SSH, Sudo y PAM..."
 
 cat << 'EOF' | sudo tee /etc/issue.net > /dev/null
 ***************************************************************************
 AVISO LEGAL - PLATAFORMA INDUSTRIAL DE MANTENIMIENTO PREDICTIVO (UCC)
 Este sistema es de acceso restringido. Todas las sesiones, comandos y
-conexiones están siendo monitoreadas y auditadas en tiempo real (auditd).
-El acceso no autorizado será bloqueado y reportado.
+conexiones estan siendo monitoreadas y auditadas en tiempo real (auditd).
+El acceso no autorizado sera bloqueado y reportado.
 ***************************************************************************
 EOF
 
@@ -68,7 +68,7 @@ Defaults passwd_tries=3
 EOF
 sudo chmod 0440 /etc/sudoers.d/99-hardening
 
-# Políticas de contraseñas PAM (/etc/security/pwquality.conf)
+# Politicas de contrasenas PAM (/etc/security/pwquality.conf)
 cat << 'EOF' | sudo tee /etc/security/pwquality.conf > /dev/null
 minlen = 14
 minclass = 3
@@ -84,7 +84,7 @@ unlock_time = 900
 fail_interval = 900
 EOF
 
-# Permisos de archivos críticos del sistema (Diapositiva 20)
+# Permisos de archivos criticos del sistema
 sudo chmod 600 /boot/grub/grub.cfg 2>/dev/null || true
 sudo chmod 640 /etc/shadow /etc/gshadow
 sudo chmod 644 /etc/passwd /etc/group
@@ -93,7 +93,7 @@ sudo chmod 700 /root
 # -----------------------------------------------------------------------------
 # FASE 3: Firewall UFW + IPS de Host con Fail2ban
 # -----------------------------------------------------------------------------
-echo "🧱 [Fase 3] Configurando Firewall UFW y Fail2ban..."
+echo "[Fase 3] Configurando Firewall UFW y Fail2ban..."
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw limit 22/tcp comment 'SSH con Rate Limit anti-fuerza bruta'
@@ -127,9 +127,9 @@ sudo systemctl enable --now fail2ban
 sudo systemctl restart fail2ban
 
 # -----------------------------------------------------------------------------
-# FASE 4: Hardening del Kernel Linux (sysctl), Core Dumps y Módulos
+# FASE 4: Hardening del Kernel Linux (sysctl), Core Dumps y Modulos
 # -----------------------------------------------------------------------------
-echo "⚙️ [Fase 4] Endureciendo parámetros del Kernel (/etc/sysctl.d/99-hardening.conf)..."
+echo "[Fase 4] Endureciendo parametros del Kernel (/etc/sysctl.d/99-hardening.conf)..."
 cat << 'EOF' | sudo tee /etc/sysctl.d/99-hardening.conf > /dev/null
 # Nota: ip_forward=1 requerido para el puente de red de Docker Compose
 net.ipv4.ip_forward = 1
@@ -146,7 +146,7 @@ net.ipv4.tcp_syncookies = 1
 net.ipv6.conf.all.accept_redirects = 0
 net.ipv6.conf.all.accept_ra = 0
 
-# Memoria y procesos (ASLR y restricción de punteros del kernel)
+# Memoria y procesos (ASLR y restriccion de punteros del kernel)
 kernel.randomize_va_space = 2
 kernel.kptr_restrict = 2
 kernel.dmesg_restrict = 1
@@ -159,7 +159,7 @@ vm.max_map_count = 262144
 EOF
 sudo sysctl --system > /dev/null
 
-# Deshabilitar Core Dumps (Diapositiva 87)
+# Deshabilitar Core Dumps
 sudo mkdir -p /etc/systemd/coredump.conf.d
 cat << 'EOF' | sudo tee /etc/systemd/coredump.conf.d/disable.conf > /dev/null
 [Coredump]
@@ -168,7 +168,7 @@ ProcessSizeMax=0
 EOF
 echo "* hard core 0" | sudo tee /etc/security/limits.d/99-nocore.conf > /dev/null
 
-# Bloquear módulos innecesarios (Diapositiva 87)
+# Bloquear modulos innecesarios
 cat << 'EOF' | sudo tee /etc/modprobe.d/99-hardening.conf > /dev/null
 install cramfs /bin/false
 install freevxfs /bin/false
@@ -184,7 +184,7 @@ EOF
 # -----------------------------------------------------------------------------
 # FASE 5: Monitoreo de Recursos (sysstat + script check-resources.sh en cron)
 # -----------------------------------------------------------------------------
-echo "📊 [Fase 5] Activando sysstat y script de vigilancia /usr/local/sbin/check-resources.sh..."
+echo "[Fase 5] Activando sysstat y script de vigilancia /usr/local/sbin/check-resources.sh..."
 sudo sed -i 's/ENABLED="false"/ENABLED="true"/' /etc/default/sysstat 2>/dev/null || true
 sudo systemctl enable --now sysstat || true
 
@@ -205,9 +205,9 @@ sudo chmod 700 /usr/local/sbin/check-resources.sh
 echo '*/5 * * * * root /usr/local/sbin/check-resources.sh' | sudo tee /etc/cron.d/check-resources > /dev/null
 
 # -----------------------------------------------------------------------------
-# FASE 6: Auditoría Forense con auditd y Línea Base de Binarios SUID
+# FASE 6: Auditoria Forense con auditd y Linea Base de Binarios SUID
 # -----------------------------------------------------------------------------
-echo "🕵️ [Fase 6] Configurando reglas forenses en /etc/audit/rules.d/99-hardening.rules..."
+echo "[Fase 6] Configurando reglas forenses en /etc/audit/rules.d/99-hardening.rules..."
 cat << 'EOF' | sudo tee /etc/audit/rules.d/99-hardening.rules > /dev/null
 -D
 -b 8192
@@ -226,15 +226,14 @@ EOF
 sudo augenrules --load 2>/dev/null || true
 sudo systemctl enable --now auditd || true
 
-# Guardar línea base de binarios SUID/SGID (Diapositiva 45)
+# Guardar linea base de binarios SUID/SGID
 sudo find / -xdev -perm -4000 -type f 2>/dev/null > /home/ubuntu/suid_baseline.txt || true
 sudo find / -xdev -perm -2000 -type f 2>/dev/null >> /home/ubuntu/suid_baseline.txt || true
 
 # -----------------------------------------------------------------------------
-# FASE 7: Servicio Systemd Confinado para Puente Amazon SNS (Diapositivas 9, 44 y 106)
+# FASE 7: Servicio Systemd Confinado para Puente Amazon SNS (IMDSv2)
 # -----------------------------------------------------------------------------
-echo "☁️ [Fase 7] Configurando servicio systemd confinado (scada-sns-bridge.service)..."
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-boto3 > /dev/null 2>&1
+echo "[Fase 7] Configurando servicio systemd confinado (scada-sns-bridge.service)..."
 
 cat << 'EOF' | sudo tee /usr/local/sbin/scada-sns-bridge.py > /dev/null
 #!/usr/bin/env python3
@@ -320,16 +319,15 @@ TasksMax=64
 WantedBy=multi-user.target
 EOF
 
-# Permitir tráfico desde la subred interna de Docker hacia el puerto local 9099
 sudo ufw allow from 172.16.0.0/12 to any port 9099 proto tcp comment 'Docker internal to SNS bridge' || true
 sudo systemctl daemon-reload
 sudo systemctl enable --now scada-sns-bridge.service
 sudo systemctl restart scada-sns-bridge.service
 
 # -----------------------------------------------------------------------------
-# FASE 8: Respaldo Diario de PostgreSQL con Firma SHA-256 + Réplica Cifrada en AWS S3
+# FASE 8: Respaldo Diario de PostgreSQL con Firma SHA-256 + Replica en AWS S3
 # -----------------------------------------------------------------------------
-echo "💾 [Fase 8] Configurando respaldos de PostgreSQL con firma SHA-256 y réplica en Amazon S3..."
+echo "[Fase 8] Configurando respaldos de PostgreSQL con firma SHA-256 y replica en Amazon S3..."
 sudo mkdir -p /var/backups/scada-postgres
 sudo chmod 700 /var/backups/scada-postgres
 
@@ -422,9 +420,7 @@ if docker ps --format '{{.Names}}' | grep -q '^iot_postgres$'; then
     docker exec iot_postgres pg_dump -U iot_admin -d mantenimiento_db | gzip -9 > "$BACKUP_FILE"
     sha256sum "$BACKUP_FILE" > "$HASH_FILE"
     chmod 600 "$BACKUP_FILE" "$HASH_FILE"
-    # Retención local de 7 días para cuidar el disco de la capa gratuita
     find "$BACKUP_DIR" -type f -mtime +7 -delete
-    # Subir copia cifrada (AES256) y firma SHA-256 al Bucket Privado en Amazon S3
     /usr/bin/python3 /usr/local/sbin/upload-backup-s3.py "$BACKUP_FILE" "$HASH_FILE" || true
     logger -t scada-backup "Backup PostgreSQL exitoso y replicado en AWS S3: ${BACKUP_FILE}"
 fi
@@ -434,9 +430,9 @@ sudo ln -sf /usr/local/sbin/backup-postgres-scada.sh /etc/cron.daily/backup-post
 sudo /usr/local/sbin/backup-postgres-scada.sh || true
 
 # -----------------------------------------------------------------------------
-# FASE 9: Telemetría de Sistema Operativo hacia AWS CloudWatch (Capa Gratuita)
+# FASE 9: Telemetria de Sistema Operativo hacia AWS CloudWatch (Capa Gratuita)
 # -----------------------------------------------------------------------------
-echo "📈 [Fase 9] Configurando envío de métricas RAM/Swap/Disco/Docker hacia AWS CloudWatch..."
+echo "[Fase 9] Configurando envio de metricas RAM/Swap/Disco/Docker hacia AWS CloudWatch..."
 cat << 'EOF' | sudo tee /usr/local/sbin/push-cloudwatch-metrics.py > /dev/null
 #!/usr/bin/env python3
 import subprocess
@@ -483,8 +479,87 @@ sudo chmod 700 /usr/local/sbin/push-cloudwatch-metrics.py
 echo '*/5 * * * * root /usr/bin/python3 /usr/local/sbin/push-cloudwatch-metrics.py >/dev/null 2>&1' | sudo tee /etc/cron.d/scada-cloudwatch > /dev/null
 sudo /usr/bin/python3 /usr/local/sbin/push-cloudwatch-metrics.py || true
 
+# -----------------------------------------------------------------------------
+# FASE 10: Registro del Certificado TLS en AWS Certificate Manager (ACM)
+# -----------------------------------------------------------------------------
+echo "[Fase 10] Importando y registrando certificado TLS en AWS Certificate Manager (ACM)..."
+cat << 'EOF' | sudo tee /usr/local/sbin/register-acm-cert.py > /dev/null
+#!/usr/bin/env python3
+import os
+import boto3
+
+if os.path.isfile("/etc/scada-ssl/scada.crt") and os.path.isfile("/etc/scada-ssl/scada.key"):
+    with open("/etc/scada-ssl/scada.crt", "rb") as f:
+        raw_pem = f.read().decode("utf-8")
+    with open("/etc/scada-ssl/scada.key", "rb") as f:
+        priv_key = f.read()
+
+    parts = [p.strip() + "\n-----END CERTIFICATE-----\n" for p in raw_pem.split("-----END CERTIFICATE-----") if "-----BEGIN CERTIFICATE-----" in p]
+    leaf_cert = parts[0].encode("utf-8")
+    chain_cert = "".join(parts[1:]).encode("utf-8") if len(parts) > 1 else None
+
+    acm = boto3.Session(region_name="us-east-2").client("acm")
+    existing = acm.list_certificates()["CertificateSummaryList"]
+    target_arn = None
+    for c in existing:
+        if "scada-ucc-alejandro" in c.get("DomainName", ""):
+            target_arn = c["CertificateArn"]
+            break
+
+    kwargs = {
+        "Certificate": leaf_cert,
+        "PrivateKey": priv_key
+    }
+    if chain_cert:
+        kwargs["CertificateChain"] = chain_cert
+    if target_arn:
+        kwargs["CertificateArn"] = target_arn
+    else:
+        kwargs["Tags"] = [
+            {"Key": "Project", "Value": "SCADA-Predictive-Maintenance-UCC"},
+            {"Key": "Environment", "Value": "Production"}
+        ]
+
+    res = acm.import_certificate(**kwargs)
+    print("AWS_ACM_CERTIFICATE_ARN:", res["CertificateArn"])
+EOF
+sudo chmod 700 /usr/local/sbin/register-acm-cert.py
+sudo /usr/bin/python3 /usr/local/sbin/register-acm-cert.py || true
+
+# -----------------------------------------------------------------------------
+# FASE 11: Auto-Deploy Continuo (GitOps) Sincronizado con la Rama main de GitHub
+# -----------------------------------------------------------------------------
+echo "[Fase 11] Configurando Auto-Deploy continuo sincronizado con origin/main de GitHub..."
+cat << 'EOF' | sudo tee /usr/local/sbin/scada-autodeploy.sh > /dev/null
+#!/usr/bin/env bash
+set -e
+REPO_DIR="/home/ubuntu/FinalFinal"
+if [ ! -d "$REPO_DIR/.git" ]; then
+    exit 0
+fi
+
+cd "$REPO_DIR"
+git fetch origin main --quiet
+LOCAL_HASH=$(git rev-parse HEAD)
+REMOTE_HASH=$(git rev-parse origin/main)
+
+if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
+    logger -t scada-autodeploy "Nuevo commit detectado en main (${REMOTE_HASH}). Iniciando actualizacion automatica..."
+    git reset --hard origin/main
+    docker compose up -d --build --remove-orphans
+    if [ -f /etc/scada-ssl/scada.crt ] && [ -f /etc/scada-ssl/scada.key ]; then
+        docker cp /etc/scada-ssl/scada.crt iot_frontend_dashboard:/etc/nginx/ssl/scada.crt || true
+        docker cp /etc/scada-ssl/scada.key iot_frontend_dashboard:/etc/nginx/ssl/scada.key || true
+        docker exec iot_frontend_dashboard nginx -s reload || true
+    fi
+    logger -t scada-autodeploy "Despliegue automatico completado en commit ${REMOTE_HASH}"
+fi
+EOF
+sudo chmod 700 /usr/local/sbin/scada-autodeploy.sh
+echo '*/2 * * * * root /usr/local/sbin/scada-autodeploy.sh >> /var/log/scada-autodeploy.log 2>&1' | sudo tee /etc/cron.d/scada-autodeploy > /dev/null
+
 echo "========================================================================"
-echo "✅ HARDENING DE UBUNTU SERVER + S3 BACKUPS + CLOUDWATCH COMPLETADO"
+echo "[COMPLETADO] HARDENING + S3 + CLOUDWATCH + ACM + AUTODEPLOY ACTIVOS"
 echo "========================================================================"
 sudo ufw status verbose
 sudo fail2ban-client status

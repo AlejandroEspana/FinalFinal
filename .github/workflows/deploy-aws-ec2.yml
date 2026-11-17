@@ -1,0 +1,38 @@
+name: CI/CD - Build, Test & Auto-Deploy SCADA IoT to AWS EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  verify-and-test:
+    name: Compilar y Ejecutar Tests Unitarios (Java 17 & React TS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Ejecutar Suite de Pruebas Unitarias y de Contratos JSON en Microservicios
+        run: |
+          for service in sensor_producer alert_detector alert_router plant_monitor_backend operator_console_backend action_dispatcher actuator_worker maintenance_worker; do
+            echo "=== Verificando $service ==="
+            mvn -B -f Backend/$service/pom.xml test
+          done
+
+      - name: Configurar Node.js 20 y Compilar Frontend + Gemelo Digital 3D
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: |
+          cd Frontend
+          npm install --no-audit --no-fund
+          npm run build

@@ -4,7 +4,76 @@ Esta guía documenta todos los comandos y procedimientos para auditar, probar y 
 
 ---
 
-## 1. Conexión Segura por SSH a la Máquina Virtual
+## 1. Proceso Completo y Comandos de Cómo Desplegamos el Sistema en AWS EC2
+
+A continuación se documentan todos los comandos exactos que se ejecutaron para aprovisionar, blindar y desplegar la plataforma desde cero en **AWS EC2 (Ubuntu Server 24.04 LTS — Capa Gratuita)**:
+
+### Paso 1.1: Configuración en Consola AWS (IAM Role y Security Group)
+1. **Instancia EC2**: Ubuntu Server 24.04 LTS (`t2.micro` / `t3.micro` en región `us-east-2` Ohio), IP pública `77.113.90.86`, llave SSH `aws-iot-key.pem`.
+2. **Security Group (`launch-wizard-1`)**:
+   * `TCP 22 (SSH)` $\rightarrow$ Administración remota.
+   * `TCP 80 (HTTP)` y `TCP 443 (HTTPS)` $\rightarrow$ Único punto de entrada hacia el Reverse Proxy Nginx.
+   * Todos los puertos internos (`5432`, `9092`, `2181`, `5672`, `15672`, `8080-8094`) quedan cerrados al exterior.
+3. **Rol IAM (`ec2-scada-sns-role`) adjunto a la instancia EC2 (IMDSv2 sin llaves en disco)**:
+   * `AmazonSNSFullAccess` (Publicación de boletines ISO 10816-3 por correo y SMS).
+   * `AmazonS3FullAccess` (Réplica cifrada `AES-256` de respaldos diarios de PostgreSQL).
+   * `CloudWatchAgentServerPolicy` (Envío de métricas de RAM, Swap, Disco y Contenedores).
+   * `AWSCertificateManagerFullAccess` (Registro y gestión del certificado TLS en AWS ACM).
+   * `AmazonSSMManagedInstanceCore` (Gestión mediante AWS Systems Manager).
+
+### Paso 1.2: Preparación Inicial del Servidor, Memoria Swap (6 GB) e Instalación de Docker
+```bash
+# Conectarse al servidor Ubuntu en AWS EC2
+ssh -i "aws-iot-key.pem" ubuntu@77.113.90.86
+
+# Clonar el repositorio oficial desde la rama main de GitHub
+git clone https://github.com/AlejandroEspana/FinalFinal.git
+cd ~/FinalFinal
+
+# Ejecutar el script de despliegue inicial (crea 6 GB Swap, configura vm.max_map_count=262144 e instala Docker Compose v2)
+chmod +x aws/deploy-aws.sh
+./aws/deploy-aws.sh
+```
+
+### Paso 1.3: Ejecución del Hardening de Ubuntu Server e Integración con AWS (SNS, S3, CloudWatch, ACM)
+```bash
+# Ejecutar el script de endurecimiento de 11 fases (sin emojis, idempotente)
+chmod +x aws/hardening-ubuntu.sh
+./aws/hardening-ubuntu.sh
+```
+
+### Paso 1.4: Emisión del Certificado TLS e Importación en AWS Certificate Manager (ACM)
+```bash
+# Emitir certificado TLS firmado por Let's Encrypt para el dominio y recargar Nginx
+sudo docker exec iot_frontend_dashboard sh -c 'apk add --no-cache certbot && \
+  certbot certonly --webroot -w /usr/share/nginx/html \
+  -d scada-ucc-alejandro.77.113.90.86.sslip.io \
+  --non-interactive --agree-tos -m alejandro.espaname@campusucc.edu.co && \
+  cp /etc/letsencrypt/live/scada-ucc-alejandro.77.113.90.86.sslip.io/fullchain.pem /etc/nginx/ssl/scada.crt && \
+  cp /etc/letsencrypt/live/scada-ucc-alejandro.77.113.90.86.sslip.io/privkey.pem /etc/nginx/ssl/scada.key && \
+  nginx -s reload'
+
+# Persistir certificado en el host e importarlo oficialmente en AWS Certificate Manager (ACM)
+sudo mkdir -p /etc/scada-ssl
+sudo docker cp iot_frontend_dashboard:/etc/nginx/ssl/scada.crt /etc/scada-ssl/scada.crt
+sudo docker cp iot_frontend_dashboard:/etc/nginx/ssl/scada.key /etc/scada-ssl/scada.key
+sudo chmod 600 /etc/scada-ssl/scada.key
+sudo /usr/bin/python3 /usr/local/sbin/register-acm-cert.py
+```
+
+### Paso 1.5: Verificación del Auto-Deploy Continuo (GitOps Sincronizado con la Rama `main` de GitHub)
+El servidor cuenta con el servicio programado `/usr/local/sbin/scada-autodeploy.sh` (`/etc/cron.d/scada-autodeploy`) que consulta cada 2 minutos la rama `main` de GitHub (`https://github.com/AlejandroEspana/FinalFinal.git`). Cuando detecta un nuevo `git push origin main`, actualiza el código, recompila los contenedores modificados y preserva los certificados TLS automáticamente:
+
+```bash
+# Verificar el script de Auto-Deploy y su registro de actividad
+sudo cat /etc/cron.d/scada-autodeploy
+sudo /usr/local/sbin/scada-autodeploy.sh
+sudo tail -n 20 /var/log/scada-autodeploy.log
+```
+
+---
+
+## 2. Conexión Segura por SSH a la Máquina Virtual
 
 Desde PowerShell o terminal en tu equipo local (ubicado en la carpeta del proyecto):
 
@@ -16,7 +85,7 @@ ssh -i "aws-iot-key.pem" ubuntu@77.113.90.86
 
 ---
 
-## 2. Verificación de las Capas de Hardening de Sistemas Operativos (Ubuntu Server)
+## 3. Verificación de las Capas de Hardening de Sistemas Operativos (Ubuntu Server)
 
 Una vez dentro de la máquina virtual (`ubuntu@ip-172-31-42-155:~$`), puedes ejecutar los siguientes comandos para demostrar cada control de seguridad ante el evaluador:
 
