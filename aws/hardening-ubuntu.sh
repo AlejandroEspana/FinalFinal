@@ -327,11 +327,85 @@ sudo systemctl enable --now scada-sns-bridge.service
 sudo systemctl restart scada-sns-bridge.service
 
 # -----------------------------------------------------------------------------
-# FASE 8: Respaldo Automático Diario de PostgreSQL con Firma SHA-256 (Diapositivas 88-90)
+# FASE 8: Respaldo Diario de PostgreSQL con Firma SHA-256 + Réplica Cifrada en AWS S3
 # -----------------------------------------------------------------------------
-echo "💾 [Fase 8] Configurando respaldos automáticos diarios de PostgreSQL con firma SHA-256..."
+echo "💾 [Fase 8] Configurando respaldos de PostgreSQL con firma SHA-256 y réplica en Amazon S3..."
 sudo mkdir -p /var/backups/scada-postgres
 sudo chmod 700 /var/backups/scada-postgres
+
+cat << 'EOF' | sudo tee /usr/local/sbin/upload-backup-s3.py > /dev/null
+#!/usr/bin/env python3
+import os
+import sys
+import urllib.request
+import boto3
+
+def get_meta(path, default=""):
+    try:
+        req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            method="PUT",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
+        )
+        token = urllib.request.urlopen(req, timeout=2).read().decode()
+        req2 = urllib.request.Request(
+            f"http://169.254.169.254/latest/meta-data/{path}",
+            headers={"X-aws-ec2-metadata-token": token}
+        )
+        return urllib.request.urlopen(req2, timeout=2).read().decode().strip()
+    except Exception:
+        return default
+
+region = get_meta("placement/region", "us-east-2")
+session = boto3.Session(region_name=region)
+sts = session.client("sts")
+account_id = sts.get_caller_identity()["Account"]
+bucket_name = f"scada-ucc-backups-{account_id}"
+s3 = session.client("s3")
+
+try:
+    if region == "us-east-1":
+        s3.create_bucket(Bucket=bucket_name)
+    else:
+        s3.create_bucket(
+            Bucket=bucket_name,
+            CreateBucketConfiguration={"LocationConstraint": region}
+        )
+except Exception as e:
+    if "BucketAlreadyOwnedByYou" not in str(e) and "BucketAlreadyExists" not in str(e):
+        print(f"Aviso create_bucket: {e}")
+
+try:
+    s3.put_public_access_block(
+        Bucket=bucket_name,
+        PublicAccessBlockConfiguration={
+            "BlockPublicAcls": True,
+            "IgnorePublicAcls": True,
+            "BlockPublicPolicy": True,
+            "RestrictPublicBuckets": True
+        }
+    )
+    s3.put_bucket_encryption(
+        Bucket=bucket_name,
+        ServerSideEncryptionConfiguration={
+            "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
+        }
+    )
+except Exception as e:
+    print(f"Aviso blindaje S3: {e}")
+
+for file_path in sys.argv[1:]:
+    if os.path.isfile(file_path):
+        key = "postgres/" + os.path.basename(file_path)
+        s3.upload_file(
+            file_path,
+            bucket_name,
+            key,
+            ExtraArgs={"ServerSideEncryption": "AES256"}
+        )
+        print(f"S3_UPLOAD_OK: s3://{bucket_name}/{key}")
+EOF
+sudo chmod 700 /usr/local/sbin/upload-backup-s3.py
 
 cat << 'EOF' | sudo tee /usr/local/sbin/backup-postgres-scada.sh > /dev/null
 #!/usr/bin/env bash
@@ -348,17 +422,69 @@ if docker ps --format '{{.Names}}' | grep -q '^iot_postgres$'; then
     docker exec iot_postgres pg_dump -U iot_admin -d mantenimiento_db | gzip -9 > "$BACKUP_FILE"
     sha256sum "$BACKUP_FILE" > "$HASH_FILE"
     chmod 600 "$BACKUP_FILE" "$HASH_FILE"
-    # Retención de 7 días para cuidar el disco de la capa gratuita
+    # Retención local de 7 días para cuidar el disco de la capa gratuita
     find "$BACKUP_DIR" -type f -mtime +7 -delete
-    logger -t scada-backup "Backup PostgreSQL exitoso: ${BACKUP_FILE} (SHA-256 verificado)"
+    # Subir copia cifrada (AES256) y firma SHA-256 al Bucket Privado en Amazon S3
+    /usr/bin/python3 /usr/local/sbin/upload-backup-s3.py "$BACKUP_FILE" "$HASH_FILE" || true
+    logger -t scada-backup "Backup PostgreSQL exitoso y replicado en AWS S3: ${BACKUP_FILE}"
 fi
 EOF
 sudo chmod 700 /usr/local/sbin/backup-postgres-scada.sh
 sudo ln -sf /usr/local/sbin/backup-postgres-scada.sh /etc/cron.daily/backup-postgres-scada
 sudo /usr/local/sbin/backup-postgres-scada.sh || true
 
+# -----------------------------------------------------------------------------
+# FASE 9: Telemetría de Sistema Operativo hacia AWS CloudWatch (Capa Gratuita)
+# -----------------------------------------------------------------------------
+echo "📈 [Fase 9] Configurando envío de métricas RAM/Swap/Disco/Docker hacia AWS CloudWatch..."
+cat << 'EOF' | sudo tee /usr/local/sbin/push-cloudwatch-metrics.py > /dev/null
+#!/usr/bin/env python3
+import subprocess
+import urllib.request
+import boto3
+
+def get_meta(path, default=""):
+    try:
+        req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            method="PUT",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
+        )
+        token = urllib.request.urlopen(req, timeout=2).read().decode()
+        req2 = urllib.request.Request(
+            f"http://169.254.169.254/latest/meta-data/{path}",
+            headers={"X-aws-ec2-metadata-token": token}
+        )
+        return urllib.request.urlopen(req2, timeout=2).read().decode().strip()
+    except Exception:
+        return default
+
+region = get_meta("placement/region", "us-east-2")
+instance_id = get_meta("instance-id", "ec2-scada-ucc")
+
+mem_pct = float(subprocess.check_output("free | awk '/Mem:/ {printf \"%.2f\", $3/$2*100}'", shell=True).decode().strip() or 0)
+swap_pct = float(subprocess.check_output("free | awk '/Swap:/ {if ($2>0) printf \"%.2f\", $3/$2*100; else print 0}'", shell=True).decode().strip() or 0)
+disk_pct = float(subprocess.check_output("df --output=pcent / | tail -1 | tr -dc '0-9'", shell=True).decode().strip() or 0)
+containers = int(subprocess.check_output("docker ps -q | wc -l", shell=True).decode().strip() or 0)
+
+cw = boto3.Session(region_name=region).client("cloudwatch")
+cw.put_metric_data(
+    Namespace="SCADA/IndustrialIoT",
+    MetricData=[
+        {"MetricName": "MemoryUtilizationPercent", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Value": mem_pct, "Unit": "Percent"},
+        {"MetricName": "SwapUtilizationPercent", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Value": swap_pct, "Unit": "Percent"},
+        {"MetricName": "DiskUtilizationPercent", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Value": disk_pct, "Unit": "Percent"},
+        {"MetricName": "ActiveDockerContainers", "Dimensions": [{"Name": "InstanceId", "Value": instance_id}], "Value": containers, "Unit": "Count"}
+    ]
+)
+print(f"CLOUDWATCH_METRICS_OK: RAM={mem_pct}% SWAP={swap_pct}% DISK={disk_pct}% CONTAINERS={containers}")
+EOF
+sudo chmod 700 /usr/local/sbin/push-cloudwatch-metrics.py
+echo '*/5 * * * * root /usr/bin/python3 /usr/local/sbin/push-cloudwatch-metrics.py >/dev/null 2>&1' | sudo tee /etc/cron.d/scada-cloudwatch > /dev/null
+sudo /usr/bin/python3 /usr/local/sbin/push-cloudwatch-metrics.py || true
+
 echo "========================================================================"
-echo "✅ HARDENING DE UBUNTU SERVER COMPLETADO CON ÉXITO"
+echo "✅ HARDENING DE UBUNTU SERVER + S3 BACKUPS + CLOUDWATCH COMPLETADO"
 echo "========================================================================"
 sudo ufw status verbose
 sudo fail2ban-client status

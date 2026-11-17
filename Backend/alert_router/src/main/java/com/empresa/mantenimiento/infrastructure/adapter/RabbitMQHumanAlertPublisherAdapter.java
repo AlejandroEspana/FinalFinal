@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Adaptador RabbitMQ que publica en el Fanout Exchange 'human_alerts' y emite boletín técnico
- * formal a Amazon SNS + Push móvil con control de tasa (cooldown de 60s).
+ * formal exclusivamente hacia Amazon SNS con control de tasa (cooldown de 60s).
  */
 @Component
 public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPort {
@@ -80,7 +80,7 @@ public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPo
                 long now = System.currentTimeMillis();
                 long prev = lastExternalNotificationAt.get();
                 if (now - prev >= NOTIFICATION_COOLDOWN_MS && lastExternalNotificationAt.compareAndSet(prev, now)) {
-                    CompletableFuture.runAsync(() -> sendCriticalAlertToSnsAndPush(request));
+                    CompletableFuture.runAsync(() -> sendCriticalAlertToSns(request));
                 }
             }
         } catch (JsonProcessingException e) {
@@ -88,7 +88,7 @@ public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPo
         }
     }
 
-    private void sendCriticalAlertToSnsAndPush(HumanActionRequest request) {
+    private void sendCriticalAlertToSns(HumanActionRequest request) {
         String sensorId = request.sensorId().value();
         String location = SENSOR_BUILDING_LOCATION.getOrDefault(sensorId, "Edificio Industrial — Sector " + sensorId);
         String formattedDate = COLOMBIA_TIME_FMT.format(Instant.now());
@@ -135,19 +135,6 @@ public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPo
                     .POST(HttpRequest.BodyPublishers.ofString(snsJson, StandardCharsets.UTF_8))
                     .build();
             httpClient.send(snsReq, HttpResponse.BodyHandlers.discarding());
-        } catch (Exception ignored) {
-        }
-
-        try {
-            HttpRequest pushReq = HttpRequest.newBuilder()
-                    .uri(URI.create("https://ntfy.sh/scada-ucc-alejandro-573154613867"))
-                    .timeout(Duration.ofSeconds(5))
-                    .header("Title", subject)
-                    .header("Priority", "urgent")
-                    .header("Tags", "rotating_light,warning")
-                    .POST(HttpRequest.BodyPublishers.ofString(msg, StandardCharsets.UTF_8))
-                    .build();
-            httpClient.send(pushReq, HttpResponse.BodyHandlers.discarding());
         } catch (Exception ignored) {
         }
     }

@@ -27,10 +27,9 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * Adaptador Multicanal de Notificaciones Industriales con formato corporativo ISO-10816:
- * 1) Amazon SNS Oficial (arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc) -> Email + SMS
- * 2) Push Móvil en Tiempo Real (ntfy.sh)
- * 3) Enlace Directo a WhatsApp (+573154613867)
+ * Adaptador de Notificaciones Industriales con formato corporativo ISO 10816-3:
+ * Despacho oficial mediante Amazon SNS (arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc)
+ * hacia Correo Electrónico Institucional y SMS Cloud.
  */
 @Service
 public class MultichannelNotificationService {
@@ -55,7 +54,6 @@ public class MultichannelNotificationService {
 
     private volatile String targetEmail;
     private volatile String targetPhone;
-    private volatile String ntfyTopic;
     private volatile String snsBridgeUrl;
     private volatile boolean notificationsEnabled;
 
@@ -66,13 +64,11 @@ public class MultichannelNotificationService {
     public MultichannelNotificationService(
             @Value("${app.notifications.email:alejandro.espaname@campusucc.edu.co}") String targetEmail,
             @Value("${app.notifications.phone:+573154613867}") String targetPhone,
-            @Value("${app.notifications.ntfy-topic:scada-ucc-alejandro-573154613867}") String ntfyTopic,
             @Value("${app.notifications.sns-bridge-url:http://host.docker.internal:9099/publish}") String snsBridgeUrl,
             @Value("${app.notifications.enabled:true}") boolean notificationsEnabled
     ) {
         this.targetEmail = targetEmail;
         this.targetPhone = targetPhone;
-        this.ntfyTopic = ntfyTopic;
         this.snsBridgeUrl = snsBridgeUrl;
         this.notificationsEnabled = notificationsEnabled;
         this.httpClient = HttpClient.newBuilder()
@@ -110,13 +106,12 @@ public class MultichannelNotificationService {
                 "   • Observaciones Técnicas     : %s\n\n" +
                 "3. TRAZABILIDAD TRANSACCIONAL Y AUDITORÍA (ACID)\n" +
                 "   • ID Registro PostgreSQL     : #%d (Tabla operator_decision_audit)\n" +
-                "   • Estado de Transacción      : CONFIRMADA (COMMIT EXITOSO)\n\n" +
+                "   • Estado de Transacción      : CONFIRMADA (COMMIT EXITOSO + BACKUP S3)\n\n" +
                 "----------------------------------------------------------------------\n" +
                 "ACCESO DIRECTO AL GEMELO DIGITAL 3D Y CONSOLA SCADA:\n" +
                 "https://scada-ucc-alejandro.77.113.90.86.sslip.io\n" +
                 "----------------------------------------------------------------------\n" +
-                "Este es un boletín automático emitido por la Plataforma Distribuida de\n" +
-                "Mantenimiento Predictivo (Apache Kafka + RabbitMQ + PostgreSQL en AWS EC2).\n",
+                "Boletín emitido automáticamente mediante Amazon SNS (AWS Cloud Infrastructure).\n",
                 targetEmail,
                 decision.sensorId(),
                 location,
@@ -139,18 +134,19 @@ public class MultichannelNotificationService {
                 : String.format(
                         "======================================================================\n" +
                         "DIRECCIÓN DE INGENIERÍA Y MANTENIMIENTO PREDICTIVO — PLANTA INDUSTRIAL\n" +
-                        "REPORTE DE CONECTIVIDAD MULTICANAL Y ESTADO DEL GEMELO DIGITAL 3D\n" +
+                        "REPORTE DE CONECTIVIDAD AMAZON SNS Y ESTADO DEL GEMELO DIGITAL 3D\n" +
                         "======================================================================\n\n" +
                         "Fecha de Emisión : %s\n" +
-                        "Destinatario     : %s | Móvil de Guardia: %s\n\n" +
+                        "Destinatario     : %s | Línea de Guardia: %s\n\n" +
                         "1. RESUMEN DE TELEMETRÍA Y SUBSISTEMAS DISTRIBUIDOS\n" +
                         "   • Bus de Ingesta (Apache Kafka)   : OPERATIVO (3 Particiones Stateful)\n" +
                         "   • Bus de Decisiones (RabbitMQ)    : OPERATIVO (Fanout + Delayed x-delay)\n" +
-                        "   • Persistencia ACID (PostgreSQL)  : OPERATIVA (127.0.0.1:5432 Confinada)\n" +
+                        "   • Persistencia ACID (PostgreSQL)  : OPERATIVA (Red Privada Aislada)\n" +
                         "   • Gemelo Digital 3D del Edificio  : 10 Sensores Monitoreados (Niveles 1-3)\n\n" +
                         "2. SEGURIDAD DE INFRAESTRUCTURA (UBUNTU SERVER 24.04 LTS - AWS EC2)\n" +
-                        "   • Blindaje Perimetral             : Nginx Reverse Proxy (TLS / HSTS)\n" +
+                        "   • Blindaje Perimetral             : Nginx Reverse Proxy (TLS 1.2/1.3 + HSTS)\n" +
                         "   • Prevención de Intrusiones (IPS) : Fail2ban + UFW + Auditd Activos\n" +
+                        "   • Respaldo Criptográfico          : PostgreSQL SHA-256 + Réplica AWS S3\n" +
                         "   • Tópico Oficial Amazon SNS       : arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc\n\n" +
                         "----------------------------------------------------------------------\n" +
                         "ACCESO AL PANEL DE CONTROL Y MODELO 3D DEL EDIFICIO:\n" +
@@ -164,10 +160,9 @@ public class MultichannelNotificationService {
     private NotificationRecordDto dispatchNotification(String subject, String body, String tagType) {
         String cleanPhone = targetPhone.replaceAll("[^0-9]", "");
         String whatsappUrl = "https://wa.me/" + cleanPhone + "?text=" + URLEncoder.encode(body, StandardCharsets.UTF_8);
-        String pushUrl = "https://ntfy.sh/" + ntfyTopic;
-        String notifId = "OT-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        String notifId = "SNS-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 
-        List<String> statuses = new ArrayList<>();
+        String finalStatus = "PAUSED";
 
         if (notificationsEnabled) {
             try {
@@ -185,43 +180,25 @@ public class MultichannelNotificationService {
                 if (snsRes.statusCode() >= 200 && snsRes.statusCode() < 300) {
                     JsonNode node = objectMapper.readTree(snsRes.body());
                     String msgId = node.path("messageId").asText("OK");
-                    statuses.add("AWS_SNS_OK(" + msgId.substring(0, Math.min(8, msgId.length())) + ")");
+                    finalStatus = "AWS_SNS_OK (" + msgId.substring(0, Math.min(8, msgId.length())) + ")";
+                } else {
+                    finalStatus = "AWS_SNS_HTTP_" + snsRes.statusCode();
                 }
             } catch (Exception e) {
                 log.debug("Puente AWS SNS local no disponible: {}", e.getMessage());
+                finalStatus = "AWS_SNS_QUEUED";
             }
-
-            try {
-                HttpRequest pushReq = HttpRequest.newBuilder()
-                        .uri(URI.create(pushUrl))
-                        .timeout(Duration.ofSeconds(5))
-                        .header("Title", subject)
-                        .header("Priority", "high")
-                        .header("Tags", "factory,warning")
-                        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                        .build();
-                HttpResponse<String> pushRes = httpClient.send(pushReq, HttpResponse.BodyHandlers.ofString());
-                if (pushRes.statusCode() >= 200 && pushRes.statusCode() < 300) {
-                    statuses.add("PUSH_OK");
-                }
-            } catch (Exception e) {
-                log.warn("No se pudo contactar ntfy.sh: {}", e.getMessage());
-            }
-        } else {
-            statuses.add("PAUSED");
         }
-
-        String finalStatus = statuses.isEmpty() ? "QUEUED_LOCAL" : String.join(" + ", statuses);
 
         NotificationRecordDto record = new NotificationRecordDto(
                 notifId,
-                "AWS_SNS + PUSH + WHATSAPP (" + tagType + ")",
-                targetPhone + " / " + targetEmail,
+                "AMAZON_SNS (" + tagType + ")",
+                targetEmail + " / " + targetPhone,
                 subject,
                 body,
                 finalStatus,
                 whatsappUrl,
-                pushUrl,
+                "",
                 Instant.now()
         );
 
@@ -240,8 +217,8 @@ public class MultichannelNotificationService {
         return Map.of(
                 "email", targetEmail,
                 "phone", targetPhone,
-                "ntfyTopic", ntfyTopic,
-                "ntfySubscribeUrl", "https://ntfy.sh/" + ntfyTopic,
+                "ntfyTopic", "arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc",
+                "ntfySubscribeUrl", "",
                 "enabled", notificationsEnabled
         );
     }

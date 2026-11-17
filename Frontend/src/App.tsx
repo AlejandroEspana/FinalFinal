@@ -106,34 +106,34 @@ const ACTION_LABELS: Record<string, { label: string; badgeClass: string; btnClas
 
 const HARDENING_LAYERS = [
   {
-    layer: '1. Reverse Proxy, TLS & DNS Resolver',
-    tech: 'Nginx + HTTPS 443 + Resolver 127.0.0.11',
-    detail: 'Dominio scada-ucc-alejandro.77.113.90.86.sslip.io con TLS 1.2/1.3, HSTS y ocultamiento total de puertos en 127.0.0.1.'
+    layer: '1. Reverse Proxy, TLS & DNS Dinámico',
+    tech: 'Nginx + TLS 1.2/1.3 + HSTS + DNS Resolver',
+    detail: 'Dominio corporativo con cifrado en tránsito, cabeceras de defensa y ocultamiento total de la red interna de microservicios.'
   },
   {
-    layer: '2. Blindaje SSH & Cuentas',
+    layer: '2. Blindaje SSH & Control de Acceso',
     tech: '/etc/ssh/sshd_config.d/01-hardening.conf',
-    detail: 'PermitRootLogin no, PasswordAuthentication no, MaxAuthTries 3, LoginGraceTime 30, Banner legal /etc/issue.net.'
+    detail: 'PermitRootLogin no, PasswordAuthentication no, autenticación exclusiva por llave pública, MaxAuthTries 3 y Banner legal.'
   },
   {
-    layer: '3. Autenticación PAM & Sudo',
+    layer: '3. Autenticación PAM & Sudo Seguro',
     tech: 'pwquality + faillock + /etc/sudoers.d/99-hardening',
-    detail: 'Defaults use_pty, timestamp_timeout=5, passwd_tries=3 y bloqueo tras 5 intentos fallidos (15 min).'
+    detail: 'Defaults use_pty, timestamp_timeout=5, passwd_tries=3 y bloqueo automático tras intentos fallidos.'
   },
   {
     layer: '4. Firewall Host & IPS Fail2ban',
     tech: 'UFW / nftables + Fail2ban (sshd, recidive)',
-    detail: 'Política deny incoming por defecto. Bloqueo automático incremental de IPs agresivas y escáneres.'
+    detail: 'Política deny incoming por defecto. Bloqueo incremental de IPs maliciosas y escáneres de red.'
   },
   {
-    layer: '5. Hardening del Kernel Linux',
-    tech: '/etc/sysctl.d/99-hardening.conf + Coredump Off',
-    detail: 'ASLR completo (randomize_va_space=2), tcp_syncookies=1, rp_filter=1, kptr_restrict=2, dmesg_restrict=1.'
+    layer: '5. Hardening del Kernel & CloudWatch',
+    tech: '/etc/sysctl.d/99-hardening.conf + AWS CloudWatch',
+    detail: 'ASLR completo (randomize_va_space=2), tcp_syncookies=1, rp_filter=1 y telemetría de RAM/Swap/Disco hacia AWS CloudWatch.'
   },
   {
-    layer: '6. Auditoría Forense & Backups SHA-256',
-    tech: 'auditd + backup-postgres-scada.sh + Lynis',
-    detail: 'Reglas inmutables en /etc/audit/rules.d/ y respaldos diarios automáticos de PostgreSQL con firma SHA-256.'
+    layer: '6. Auditoría Forense & Backups S3 + SHA-256',
+    tech: 'auditd + backup-postgres-scada.sh + AWS S3',
+    detail: 'Reglas inmutables en /etc/audit/rules.d/ y respaldos diarios de PostgreSQL firmados con SHA-256 y replicados en Amazon S3.'
   }
 ];
 
@@ -149,8 +149,8 @@ export function App() {
   const [notifConfig, setNotifConfig] = useState<NotificationConfigDto>({
     email: 'alejandro.espaname@campusucc.edu.co',
     phone: '+573154613867',
-    ntfyTopic: 'scada-ucc-alejandro-573154613867',
-    ntfySubscribeUrl: 'https://ntfy.sh/scada-ucc-alejandro-573154613867',
+    ntfyTopic: 'arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc',
+    ntfySubscribeUrl: '',
     enabled: true
   });
   const [notifHistory, setNotifHistory] = useState<NotificationRecordDto[]>([]);
@@ -960,7 +960,7 @@ export function App() {
           </section>
         </div>
 
-        {/* SECCIÓN PLUS: Centro de Notificaciones Multicanal (Amazon SNS / WhatsApp / Push) + Hardening Ubuntu Server */}
+        {/* SECCIÓN PLUS: Centro de Boletines Corporativos vía Amazon SNS + Hardening Ubuntu Server */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <section className="lg:col-span-6 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 flex flex-col justify-between shadow-sm">
             <div>
@@ -969,10 +969,10 @@ export function App() {
                   <Bell className="w-5 h-5 text-[#8C6239]" />
                   <div>
                     <h3 className="text-sm font-bold text-[#2C2523]">
-                      Centro de Boletines Corporativos (Amazon SNS + Móvil + WhatsApp)
+                      Centro de Boletines Corporativos vía Amazon SNS (ISO 10816-3)
                     </h3>
                     <p className="text-xs text-[#6E6256]">
-                      Formato industrial ISO 10816-3 enviado vía AWS SNS y Push móvil.
+                      Despacho de actas operativas y alertas críticas mediante infraestructura oficial de AWS SNS.
                     </p>
                   </div>
                 </div>
@@ -983,15 +983,15 @@ export function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#8C6239] hover:bg-[#734F2C] text-white text-xs font-semibold transition disabled:opacity-50 shadow-sm"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  {sendingTestNotif ? 'Enviando...' : 'Emitir Boletín de Prueba'}
+                  {sendingTestNotif ? 'Enviando...' : 'Emitir Boletín SNS'}
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
                 <div className="bg-[#FAF6EE] border border-[#E5DCCB] rounded-xl p-3 text-xs">
                   <div className="flex items-center gap-1.5 text-[#8C6239] font-bold">
                     <Mail className="w-4 h-4" />
-                    <span>Amazon SNS Email</span>
+                    <span>Suscripción Correo Amazon SNS</span>
                   </div>
                   <p className="font-mono text-[#2C2523] mt-1 break-all">{notifConfig.email}</p>
                 </div>
@@ -999,31 +999,16 @@ export function App() {
                 <div className="bg-[#FAF6EE] border border-[#E5DCCB] rounded-xl p-3 text-xs">
                   <div className="flex items-center gap-1.5 text-emerald-800 font-bold">
                     <Smartphone className="w-4 h-4" />
-                    <span>SMS / WhatsApp</span>
+                    <span>Línea Móvil de Guardia (SNS / WhatsApp)</span>
                   </div>
                   <p className="font-mono text-[#2C2523] mt-1">{notifConfig.phone}</p>
-                </div>
-
-                <div className="bg-[#FAF6EE] border border-[#E5DCCB] rounded-xl p-3 text-xs">
-                  <div className="flex items-center justify-between text-[#5C4033] font-bold">
-                    <span>Push Móvil (ntfy.sh)</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </div>
-                  <a
-                    href={notifConfig.ntfySubscribeUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-mono text-[#8C6239] hover:underline mt-1 block truncate font-semibold"
-                  >
-                    {notifConfig.ntfyTopic}
-                  </a>
                 </div>
               </div>
 
               <div className="mt-4 max-h-48 overflow-y-auto space-y-2">
                 {notifHistory.length === 0 ? (
                   <p className="text-xs text-[#6E6256] py-6 text-center">
-                    Haz clic en &ldquo;Emitir Boletín de Prueba&rdquo; o resuelve una alerta para ver el historial de envíos.
+                    Haz clic en &ldquo;Emitir Boletín SNS&rdquo; o resuelve una alerta para ver el historial de envíos en Amazon SNS.
                   </p>
                 ) : (
                   notifHistory.map((n) => (
@@ -1108,7 +1093,7 @@ export function App() {
                     Actuator Workers — Paradas de Emergencia y Reactivaciones (2 Réplicas)
                   </h3>
                   <p className="text-xs text-[#6E6256]">
-                    Cola RabbitMQ: <code className="text-red-800 font-semibold">critical_actions_queue</code> (127.0.0.1:8091-8092)
+                    Cola RabbitMQ: <code className="text-red-800 font-semibold">critical_actions_queue</code> (Balanceo Round-Robin en Red Privada)
                   </p>
                 </div>
               </div>
@@ -1155,7 +1140,7 @@ export function App() {
                     Maintenance Workers — Órdenes Inmediatas y Diferidas x-delay (2 Réplicas)
                   </h3>
                   <p className="text-xs text-[#6E6256]">
-                    Cola RabbitMQ: <code className="text-amber-800 font-semibold">maintenance_queue</code> + <code className="text-[#8C6239] font-semibold">delayed_actions_exchange</code> (127.0.0.1:8093-8094)
+                    Cola RabbitMQ: <code className="text-amber-800 font-semibold">maintenance_queue</code> + <code className="text-[#8C6239] font-semibold">delayed_actions_exchange</code> (Cluster Interno Aislado)
                   </p>
                 </div>
               </div>
