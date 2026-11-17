@@ -2,14 +2,15 @@ package com.empresa.mantenimiento.domain.service;
 
 import com.empresa.mantenimiento.domain.model.SensorId;
 import com.empresa.mantenimiento.domain.model.SensorVibrationWindow;
-import org.springframework.stereotype.Service;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-@Service
+/**
+ * Servicio de Dominio Puro (sin anotaciones de Spring) que administra las ventanas móviles por sensor.
+ */
 public class WindowRegistryDomainService {
 
     private final ConcurrentMap<SensorId, SensorVibrationWindow> windows = new ConcurrentHashMap<>();

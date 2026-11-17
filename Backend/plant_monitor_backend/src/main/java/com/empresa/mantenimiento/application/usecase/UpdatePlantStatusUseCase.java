@@ -42,6 +42,14 @@ public class UpdatePlantStatusUseCase {
         return dto;
     }
 
+    public SensorPlantStatusDto haltSensor(String sensorId, String reason) {
+        SensorPlantStatusView view = materializedService.getOrCreate(sensorId);
+        view.detenerPorEmergencia(reason);
+        SensorPlantStatusDto dto = toDto(view);
+        broadcasterPort.broadcastStatus(dto);
+        return dto;
+    }
+
     public SensorPlantStatusDto resetSensor(String sensorId) {
         SensorPlantStatusView view = materializedService.getOrCreate(sensorId);
         view.normalizarEstado();
@@ -55,6 +63,7 @@ public class UpdatePlantStatusUseCase {
                 view.getSensorId().value(),
                 view.getSeverity(),
                 view.getLastVibration(),
+                view.getOperationalStatus(),
                 view.getStatusDescription(),
                 view.getLastUpdated()
         );

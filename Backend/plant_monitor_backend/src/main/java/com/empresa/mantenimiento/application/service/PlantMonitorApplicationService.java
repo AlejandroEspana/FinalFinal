@@ -5,6 +5,7 @@ import com.empresa.mantenimiento.application.usecase.UpdatePlantStatusUseCase;
 import com.empresa.mantenimiento.domain.service.PlantMaterializedDomainService;
 import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
@@ -28,10 +29,16 @@ public class PlantMonitorApplicationService {
                         v.getSensorId().value(),
                         v.getSeverity(),
                         v.getLastVibration(),
+                        v.getOperationalStatus(),
                         v.getStatusDescription(),
                         v.getLastUpdated()
                 ))
+                .sorted(Comparator.comparing(SensorPlantStatusDto::sensorId))
                 .toList();
+    }
+
+    public SensorPlantStatusDto haltSensor(String sensorId, String reason) {
+        return updateUseCase.haltSensor(sensorId, reason);
     }
 
     public SensorPlantStatusDto resetSensor(String sensorId) {

@@ -6,11 +6,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/v1/sensors")
-@CrossOrigin(origins = "*")
 public class PlantStatusController {
 
     private final PlantMonitorApplicationService monitorApplicationService;
@@ -22,6 +22,17 @@ public class PlantStatusController {
     @GetMapping("/status")
     public ResponseEntity<List<SensorPlantStatusDto>> getAllStatuses() {
         return ResponseEntity.ok(monitorApplicationService.getAllStatuses());
+    }
+
+    @PostMapping("/{sensorId}/halt")
+    public ResponseEntity<SensorPlantStatusDto> haltSensor(
+            @PathVariable String sensorId,
+            @RequestBody(required = false) Map<String, String> body
+    ) {
+        String reason = (body != null && body.get("reason") != null)
+                ? body.get("reason")
+                : "Parada de emergencia ordenada por operador humano.";
+        return ResponseEntity.ok(monitorApplicationService.haltSensor(sensorId, reason));
     }
 
     @PostMapping("/{sensorId}/reset")

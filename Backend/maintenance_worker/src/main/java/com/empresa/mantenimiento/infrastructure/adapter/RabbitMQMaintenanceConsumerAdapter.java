@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
@@ -38,7 +39,8 @@ public class RabbitMQMaintenanceConsumerAdapter {
         try {
             JsonNode root = objectMapper.readTree(jsonPayload);
             String workOrderId = root.path("workOrderId").asText("WO-UNKNOWN");
-            String sensorId = root.path("sensorId").asText();
+            JsonNode sensorNode = root.path("sensorId");
+            String sensorId = sensorNode.isObject() ? sensorNode.path("value").asText() : sensorNode.asText();
             String priority = root.path("priority").asText("Mantenimiento Programado");
             boolean delayed = root.path("delayed").asBoolean(false);
             long delayMillis = root.path("delayMillis").asLong(0L);
@@ -59,6 +61,7 @@ public class RabbitMQMaintenanceConsumerAdapter {
             orchestrationService.processWorkOrder(workOrder);
         } catch (Exception e) {
             log.error("Error procesando orden de mantenimiento en maintenance_worker: {}", e.getMessage(), e);
+            throw new AmqpRejectAndDontRequeueException("Error procesando orden de mantenimiento en maintenance_worker", e);
         }
     }
 }

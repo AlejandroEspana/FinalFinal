@@ -37,6 +37,7 @@ public class KafkaSensorTelemetryConsumerAdapter {
             detectionApplicationService.handleIncomingReading(reading);
         } catch (Exception e) {
             log.error("Fallo al consumir lectura en alert_detector [Key={}]: {}", record.key(), e.getMessage(), e);
+            throw new IllegalStateException("Error procesando mensaje de telemetría en alert_detector", e);
         }
     }
 }

@@ -5,6 +5,7 @@ import com.empresa.mantenimiento.domain.model.HumanActionRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
@@ -33,6 +34,7 @@ public class RabbitMQHumanAlertConsumerAdapter {
             consoleApplicationService.registerAndBroadcast(request);
         } catch (Exception e) {
             log.error("Error procesando alerta humana desde RabbitMQ en operator_console_backend: {}", e.getMessage(), e);
+            throw new AmqpRejectAndDontRequeueException("Error procesando alerta humana desde RabbitMQ", e);
         }
     }
 }

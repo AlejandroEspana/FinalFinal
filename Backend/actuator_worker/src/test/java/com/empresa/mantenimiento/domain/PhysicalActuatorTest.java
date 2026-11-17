@@ -19,8 +19,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PhysicalActuatorTest {
 
     @Test
-    @DisplayName("Debe transicionar de RUNNING a EMERGENCY_HALTED al ejecutar corte de energía")
-    void shouldTransitionFromRunningToEmergencyHalted() {
+    @DisplayName("Debe transicionar de RUNNING a EMERGENCY_HALTED al ejecutar corte de energía y permitir reactivación a RUNNING")
+    void shouldTransitionFromRunningToEmergencyHaltedAndRestart() {
         // Arrange
         SensorId sensorId = new SensorId("sensor_A");
         PhysicalActuator actuator = new PhysicalActuator(sensorId);
@@ -32,13 +32,21 @@ class PhysicalActuatorTest {
                 Instant.now()
         );
 
-        // Act
-        ActuatorExecutionRecord record = actuator.ejecutarCorteEnergiaInmediato(cmd);
+        // Act 1: Parada de emergencia
+        ActuatorExecutionRecord haltRecord = actuator.ejecutarCorteEnergiaInmediato(cmd);
 
-        // Assert
-        assertThat(record.previousState()).isEqualTo("RUNNING");
-        assertThat(record.currentState()).isEqualTo("EMERGENCY_HALTED");
+        // Assert 1
+        assertThat(haltRecord.previousState()).isEqualTo("RUNNING");
+        assertThat(haltRecord.currentState()).isEqualTo("EMERGENCY_HALTED");
         assertThat(actuator.getCurrentStateName()).isEqualTo("EMERGENCY_HALTED");
+
+        // Act 2: Reactivación segura de la máquina
+        ActuatorExecutionRecord resetRecord = actuator.reactivarMaquina("admin", "Mantenimiento completado");
+
+        // Assert 2
+        assertThat(resetRecord.previousState()).isEqualTo("EMERGENCY_HALTED");
+        assertThat(resetRecord.currentState()).isEqualTo("RUNNING");
+        assertThat(actuator.getCurrentStateName()).isEqualTo("RUNNING");
     }
 
     @Test

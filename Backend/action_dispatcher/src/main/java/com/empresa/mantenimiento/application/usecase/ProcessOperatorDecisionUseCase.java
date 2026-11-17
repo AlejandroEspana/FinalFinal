@@ -10,13 +10,16 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.Objects;
 
 /**
  * Caso de Uso Principal: Coordina la aplicación semántica de la decisión del operador,
- * el despacho a RabbitMQ (inmediato o diferido con x-delay) y la auditoría en PostgreSQL.
+ * persiste PRIMERO la auditoría en PostgreSQL y despacha el comando a RabbitMQ
+ * únicamente tras confirmar el registro transaccional (post-commit).
  * Aplica Inyección Estricta por Constructor (DIP).
  */
 @Component
@@ -45,6 +48,35 @@ public class ProcessOperatorDecisionUseCase {
         MaintenanceDecision decision = new MaintenanceDecision(record);
         decision.aplicarAccion(delayedMillisConfig);
 
+        // 1. Persistir primero en PostgreSQL (si la persistencia falla, no se despacha nada a RabbitMQ)
+        Long auditId = auditRepositoryPort.recordAudit(decision);
+
+        // 2. Despachar a RabbitMQ después del commit transaccional (o inmediatamente en test sin TX activa)
+        Runnable dispatchAction = () -> dispatchToBroker(record, decision);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    dispatchAction.run();
+                }
+            });
+        } else {
+            dispatchAction.run();
+        }
+
+        return new DecisionResultDto(
+                "SUCCESS",
+                "Decisión humana auditada en PostgreSQL y comando despachado exitosamente.",
+                record.alertId().value(),
+                record.sensorId().value(),
+                record.chosenAction(),
+                auditId,
+                decision.getRoutingTarget(),
+                decision.getProcessedAt()
+        );
+    }
+
+    private void dispatchToBroker(OperatorDecisionRecord record, MaintenanceDecision decision) {
         switch (record.chosenAction()) {
             case MaintenanceDecision.ACTION_SHUTDOWN_NOW -> {
                 ShutdownCommand cmd = new ShutdownCommand(
@@ -82,18 +114,5 @@ public class ProcessOperatorDecisionUseCase {
             }
             default -> log.info("Acción {} registrada sin despacho a workers.", record.chosenAction());
         }
-
-        Long auditId = auditRepositoryPort.recordAudit(decision);
-
-        return new DecisionResultDto(
-                "SUCCESS",
-                "Decisión humana auditada en PostgreSQL y comando despachado exitosamente.",
-                record.alertId().value(),
-                record.sensorId().value(),
-                record.chosenAction(),
-                auditId,
-                decision.getRoutingTarget(),
-                decision.getProcessedAt()
-        );
     }
 }

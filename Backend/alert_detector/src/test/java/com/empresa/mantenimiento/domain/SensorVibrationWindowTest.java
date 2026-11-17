@@ -3,6 +3,7 @@ package com.empresa.mantenimiento.domain;
 import com.empresa.mantenimiento.domain.exception.DomainInvariantViolationException;
 import com.empresa.mantenimiento.domain.model.*;
 import com.empresa.mantenimiento.domain.model.state.CriticalSensorState;
+import com.empresa.mantenimiento.domain.model.state.NormalSensorState;
 import com.empresa.mantenimiento.domain.model.state.WarningSensorState;
 import com.empresa.mantenimiento.domain.model.strategy.ExponentialMovingAverageStrategy;
 import com.empresa.mantenimiento.domain.model.strategy.RuleBasedThresholdStrategy;
@@ -75,6 +76,36 @@ class SensorVibrationWindowTest {
         assertThat(alertOpt).isPresent();
         assertThat(alertOpt.get().severity()).isEqualTo(AlertSeverity.WARNING);
         assertThat(window.getEstadoActual()).isInstanceOf(WarningSensorState.class);
+    }
+
+    @Test
+    @DisplayName("Patrón State Anti-Tormenta: Suprime alertas repetidas en el mismo estado pero emite si escala de WARNING a CRITICAL")
+    void shouldSuppressDuplicateAlertsAndEmitOnEscalation() {
+        window.procesarTelemetria(VibrationReadingRecord.of("sensor_A", 78.0), ruleStrategy);
+        window.procesarTelemetria(VibrationReadingRecord.of("sensor_A", 79.0), ruleStrategy);
+        Optional<IndustrialAlert> firstWarning = window.procesarTelemetria(
+                VibrationReadingRecord.of("sensor_A", 80.0), ruleStrategy
+        );
+        assertThat(firstWarning).isPresent();
+
+        // Lectura adicional en WARNING no debe causar tormenta de alertas duplicadas
+        Optional<IndustrialAlert> duplicateWarning = window.procesarTelemetria(
+                VibrationReadingRecord.of("sensor_A", 82.0), ruleStrategy
+        );
+        assertThat(duplicateWarning).isEmpty();
+
+        // Escalamiento de WARNING -> CRITICAL sí debe emitir alerta CRITICAL
+        Optional<IndustrialAlert> escalatedCritical = window.procesarTelemetria(
+                VibrationReadingRecord.of("sensor_A", 96.0), ruleStrategy
+        );
+        assertThat(escalatedCritical).isPresent();
+        assertThat(escalatedCritical.get().severity()).isEqualTo(AlertSeverity.CRITICAL);
+
+        // Retorno a NORMAL cuando la ventana se llena de lecturas seguras
+        window.procesarTelemetria(VibrationReadingRecord.of("sensor_A", 30.0), ruleStrategy);
+        window.procesarTelemetria(VibrationReadingRecord.of("sensor_A", 31.0), ruleStrategy);
+        window.procesarTelemetria(VibrationReadingRecord.of("sensor_A", 32.0), ruleStrategy);
+        assertThat(window.getEstadoActual()).isInstanceOf(NormalSensorState.class);
     }
 
     @Test

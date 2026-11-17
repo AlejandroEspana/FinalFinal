@@ -27,3 +27,7 @@ Thumbs.db
 *.pem
 *.ppk
 .env
+
+# Frontend Node / Vite build artifacts
+Frontend/node_modules/
+Frontend/dist/

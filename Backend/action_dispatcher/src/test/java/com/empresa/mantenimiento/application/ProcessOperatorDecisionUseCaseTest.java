@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -58,8 +59,8 @@ class ProcessOperatorDecisionUseCaseTest {
 
         // Assert
         ArgumentCaptor<ShutdownCommand> cmdCaptor = ArgumentCaptor.forClass(ShutdownCommand.class);
-        verify(commandPublisherPort, times(1)).dispatchShutdown(cmdCaptor.capture());
         verify(auditRepositoryPort, times(1)).recordAudit(any(MaintenanceDecision.class));
+        verify(commandPublisherPort, times(1)).dispatchShutdown(cmdCaptor.capture());
 
         assertThat(cmdCaptor.getValue().sensorId().value()).isEqualTo("sensor_A");
         assertThat(result.auditId()).isEqualTo(101L);
@@ -84,9 +85,30 @@ class ProcessOperatorDecisionUseCaseTest {
         DecisionResultDto result = useCase.execute(record);
 
         // Assert
+        verify(auditRepositoryPort, times(1)).recordAudit(any(MaintenanceDecision.class));
         verify(commandPublisherPort, times(1))
                 .dispatchDelayedMaintenance(any(MaintenanceWorkOrder.class), eq(10000L));
-        verify(auditRepositoryPort, times(1)).recordAudit(any(MaintenanceDecision.class));
         assertThat(result.auditId()).isEqualTo(202L);
+    }
+
+    @Test
+    @DisplayName("Fiabilidad Transaccional: Si falla el guardado en PostgreSQL, NUNCA publica el comando en RabbitMQ")
+    void shouldNotPublishToRabbitMqWhenDatabaseAuditFails() {
+        // Arrange
+        when(auditRepositoryPort.recordAudit(any(MaintenanceDecision.class)))
+                .thenThrow(new IllegalStateException("PostgreSQL connection error"));
+        OperatorDecisionRecord record = new OperatorDecisionRecord(
+                new AlertId("ALT-300"),
+                new SensorId("sensor_A"),
+                MaintenanceDecision.ACTION_SHUTDOWN_NOW,
+                "operator",
+                Instant.now(),
+                "Falla simulada de base de datos"
+        );
+
+        // Act & Assert
+        assertThatThrownBy(() -> useCase.execute(record))
+                .isInstanceOf(IllegalStateException.class);
+        verifyNoInteractions(commandPublisherPort);
     }
 }

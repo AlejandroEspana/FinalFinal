@@ -41,6 +41,7 @@ public class KafkaPlantConsumerAdapter {
             updatePlantStatusUseCase.applyAlert(alert);
         } catch (Exception e) {
             log.error("Error procesando alerta en plant_monitor_backend: {}", e.getMessage(), e);
+            throw new IllegalStateException("Error procesando alerta en plant_monitor_backend", e);
         }
     }
 
@@ -54,6 +55,7 @@ public class KafkaPlantConsumerAdapter {
             updatePlantStatusUseCase.applyTelemetry(reading);
         } catch (Exception e) {
             log.error("Error procesando telemetría en plant_monitor_backend: {}", e.getMessage(), e);
+            throw new IllegalStateException("Error procesando telemetría en plant_monitor_backend", e);
         }
     }
 }

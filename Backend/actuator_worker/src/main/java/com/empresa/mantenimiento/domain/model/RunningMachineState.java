@@ -11,4 +11,9 @@ public final class RunningMachineState implements MachineOperationalState {
     public MachineOperationalState onEmergencyStop() {
         return new EmergencyHaltedMachineState();
     }
+
+    @Override
+    public MachineOperationalState onReset() {
+        return this;
+    }
 }

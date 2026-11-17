@@ -1,11 +1,47 @@
 package com.empresa.mantenimiento.domain.model;
 
-import com.empresa.mantenimiento.domain.exception.InvalidWorkOrderException;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
 
-public record SensorId(String value) {
+import java.io.Serializable;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * Value Object inmutable que representa el identificador único de un sensor industrial.
+ * Aplica validaciones Fail-Fast en su constructor compacto y serialización JSON plana.
+ */
+public record SensorId(@JsonValue String value) implements Serializable {
+
     public SensorId {
-        if (value == null || value.isBlank()) {
-            throw new InvalidWorkOrderException("El sensorId en la orden de mantenimiento no puede ser vacío.");
+        Objects.requireNonNull(value, "El identificador del sensor no puede ser nulo.");
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("El identificador del sensor no puede estar vacío.");
         }
+        value = trimmed;
+    }
+
+    @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+    public static SensorId fromJson(Object raw) {
+        if (raw == null) {
+            throw new NullPointerException("El identificador del sensor no puede ser nulo.");
+        }
+        if (raw instanceof String str) {
+            return new SensorId(str);
+        }
+        if (raw instanceof Map<?, ?> map && map.get("value") instanceof String str) {
+            return new SensorId(str);
+        }
+        throw new IllegalArgumentException("Formato inválido para SensorId: " + raw);
+    }
+
+    public static SensorId of(String value) {
+        return new SensorId(value);
+    }
+
+    @Override
+    public String toString() {
+        return value;
     }
 }

@@ -1,6 +1,9 @@
 package com.empresa.mantenimiento.config;
 
+import com.empresa.mantenimiento.domain.service.TelemetryGeneratorDomainService;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
@@ -19,6 +22,11 @@ public class BeanConfig {
 
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String bootstrapServers;
+
+    @Bean
+    public TelemetryGeneratorDomainService telemetryGeneratorDomainService() {
+        return new TelemetryGeneratorDomainService();
+    }
 
     @Bean
     public ProducerFactory<String, String> producerFactory() {
@@ -40,6 +48,8 @@ public class BeanConfig {
     public ObjectMapper objectMapper() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         return mapper;
     }
 }

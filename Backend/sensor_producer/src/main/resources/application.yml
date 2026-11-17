@@ -1,5 +1,5 @@
 server:
-  port: 8089
+  port: ${SERVER_PORT:8089}
 
 spring:
   application:
@@ -11,7 +11,11 @@ spring:
 
 app:
   simulation:
-    rate-ms: ${SIMULATION_RATE_MS:2000}
+    enabled: ${APP_SIMULATION_ENABLED:true}
+    rate-ms: ${APP_SIMULATION_INTERVAL_MS:${SIMULATION_RATE_MS:3000}}
+  security:
+    operator-username: ${APP_OPERATOR_USER:operator}
+    operator-password: ${APP_OPERATOR_PASS:operator123}
   kafka:
     topics:
       sensor-data: ${TOPIC_SENSOR_DATA:sensor_data}

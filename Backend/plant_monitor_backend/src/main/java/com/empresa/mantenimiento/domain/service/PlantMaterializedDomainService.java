@@ -2,14 +2,15 @@ package com.empresa.mantenimiento.domain.service;
 
 import com.empresa.mantenimiento.domain.model.SensorId;
 import com.empresa.mantenimiento.domain.model.SensorPlantStatusView;
-import org.springframework.stereotype.Service;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Service
+/**
+ * Servicio de Dominio Puro (sin dependencias de Spring) que mantiene la vista materializada de los 10 sensores.
+ */
 public class PlantMaterializedDomainService {
 
     private final Map<String, SensorPlantStatusView> views = new ConcurrentHashMap<>();

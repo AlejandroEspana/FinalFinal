@@ -2,7 +2,10 @@ package com.empresa.mantenimiento.config;
 
 import com.empresa.mantenimiento.domain.model.strategy.AnomalyDetectionStrategy;
 import com.empresa.mantenimiento.domain.model.strategy.RuleBasedThresholdStrategy;
+import com.empresa.mantenimiento.domain.service.WindowRegistryDomainService;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -13,6 +16,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -25,6 +30,16 @@ public class BeanConfig {
 
     @Value("${spring.kafka.consumer.group-id:alert-detector-group}")
     private String groupId;
+
+    @Bean
+    public WindowRegistryDomainService windowRegistryDomainService() {
+        return new WindowRegistryDomainService();
+    }
+
+    @Bean
+    public AnomalyDetectionStrategy anomalyDetectionStrategy() {
+        return new RuleBasedThresholdStrategy();
+    }
 
     @Bean
     public ConsumerFactory<String, String> consumerFactory() {
@@ -41,6 +56,7 @@ public class BeanConfig {
     public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory() {
         ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
+        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1000L, 2L)));
         return factory;
     }
 
@@ -61,11 +77,10 @@ public class BeanConfig {
 
     @Bean
     public ObjectMapper objectMapper() {
-        return new ObjectMapper().registerModule(new JavaTimeModule());
-    }
-
-    @Bean
-    public AnomalyDetectionStrategy anomalyDetectionStrategy() {
-        return new RuleBasedThresholdStrategy();
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        return mapper;
     }
 }

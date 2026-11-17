@@ -1,1 +1,0 @@
--- No SQL migration required for stateless maintenance worker

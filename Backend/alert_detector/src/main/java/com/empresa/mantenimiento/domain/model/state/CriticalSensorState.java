@@ -20,10 +20,17 @@ public final class CriticalSensorState implements SensorRiskState {
 
     @Override
     public SensorRiskState transition(DetectionResult result) {
-        if (result.severity() == AlertSeverity.NORMAL) {
-            return WarningSensorState.getInstance();
-        }
-        return this;
+        return switch (result.severity()) {
+            case CRITICAL -> this;
+            case WARNING -> WarningSensorState.getInstance();
+            case NORMAL -> NormalSensorState.getInstance();
+        };
+    }
+
+    @Override
+    public boolean shouldEmitAlert(DetectionResult result) {
+        // Mientras permanezca en estado CRITICAL no vuelve a emitir duplicados hasta bajar de estado
+        return false;
     }
 
     @Override

@@ -9,6 +9,7 @@ import com.empresa.mantenimiento.presentation.request.OperatorDecisionRequest;
 import com.empresa.mantenimiento.presentation.response.DecisionDispatchedResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -32,11 +33,17 @@ public class ActionDecisionController {
         this.mapper = Objects.requireNonNull(mapper);
     }
 
+    public ResponseEntity<DecisionDispatchedResponse> submitDecision(OperatorDecisionRequest request) {
+        return submitDecision(request, null);
+    }
+
     @PostMapping({"/decide", "/api/v1/decide"})
     public ResponseEntity<DecisionDispatchedResponse> submitDecision(
-            @Valid @RequestBody OperatorDecisionRequest request
+            @Valid @RequestBody OperatorDecisionRequest request,
+            Authentication authentication
     ) {
-        OperatorDecisionRecord record = mapper.toDomainRecord(request);
+        String authenticatedUser = (authentication != null) ? authentication.getName() : null;
+        OperatorDecisionRecord record = mapper.toDomainRecord(request, authenticatedUser);
         DecisionResultDto resultDto = orchestrationService.processDecision(record);
         return ResponseEntity.ok(mapper.toResponse(resultDto));
     }

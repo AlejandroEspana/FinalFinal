@@ -69,9 +69,10 @@ public class SensorVibrationWindow implements Serializable {
     ) {
         registrarLectura(reading);
         DetectionResult result = evaluarCriticidad(strategy);
+        boolean emitAlert = this.currentState.shouldEmitAlert(result);
         this.currentState = this.currentState.transition(result);
 
-        if (result.requiresAlert()) {
+        if (emitAlert && result.requiresAlert()) {
             return Optional.of(IndustrialAlert.create(
                     this.sensorId,
                     result.severity(),

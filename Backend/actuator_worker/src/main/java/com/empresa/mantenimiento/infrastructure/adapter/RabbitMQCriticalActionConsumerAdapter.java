@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
@@ -37,7 +38,8 @@ public class RabbitMQCriticalActionConsumerAdapter {
         try {
             JsonNode root = objectMapper.readTree(jsonPayload);
             String commandId = root.path("commandId").asText("CMD-UNKNOWN");
-            String sensorId = root.path("sensorId").asText();
+            JsonNode sensorNode = root.path("sensorId");
+            String sensorId = sensorNode.isObject() ? sensorNode.path("value").asText() : sensorNode.asText();
             String reason = root.path("reason").asText("Apagado crítico de emergencia");
             String operatorId = root.path("operatorId").asText("operator");
             String issuedAtRaw = root.path("issuedAt").asText(null);
@@ -54,6 +56,7 @@ public class RabbitMQCriticalActionConsumerAdapter {
             orchestrationService.executeShutdown(command);
         } catch (Exception e) {
             log.error("Error procesando comando crítico en actuator_worker: {}", e.getMessage(), e);
+            throw new AmqpRejectAndDontRequeueException("Error procesando comando crítico en actuator_worker", e);
         }
     }
 }

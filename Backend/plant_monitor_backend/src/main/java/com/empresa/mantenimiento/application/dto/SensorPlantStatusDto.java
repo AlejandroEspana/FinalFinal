@@ -9,7 +9,18 @@ public record SensorPlantStatusDto(
         String sensorId,
         AlertSeverity severity,
         double lastVibration,
+        String operationalStatus,
         String statusDescription,
         Instant lastUpdated
 ) implements Serializable {
+
+    public SensorPlantStatusDto(
+            String sensorId,
+            AlertSeverity severity,
+            double lastVibration,
+            String statusDescription,
+            Instant lastUpdated
+    ) {
+        this(sensorId, severity, lastVibration, "ACTIVE", statusDescription, lastUpdated);
+    }
 }

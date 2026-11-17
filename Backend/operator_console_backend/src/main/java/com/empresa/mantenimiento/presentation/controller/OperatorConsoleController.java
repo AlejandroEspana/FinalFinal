@@ -10,7 +10,6 @@ import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/v1/alerts")
-@CrossOrigin(origins = "*")
 public class OperatorConsoleController {
 
     private final OperatorConsoleApplicationService consoleApplicationService;

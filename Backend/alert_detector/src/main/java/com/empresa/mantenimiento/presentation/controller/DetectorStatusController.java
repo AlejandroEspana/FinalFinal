@@ -15,7 +15,6 @@ import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/v1/detector")
-@CrossOrigin(origins = "*")
 public class DetectorStatusController {
 
     private final WindowRegistryDomainService windowRegistry;

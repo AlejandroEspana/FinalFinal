@@ -16,7 +16,6 @@ import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/v1/simulation")
-@CrossOrigin(origins = "*")
 public class SimulationController {
 
     private final GenerateTelemetryBatchUseCase generateBatchUseCase;
@@ -37,8 +36,15 @@ public class SimulationController {
     public ResponseEntity<ApiResponse<SimulationStatusResponse>> injectReading(
             @Valid @RequestBody SimulateReadingRequest request
     ) {
-        TelemetryEventDto dto = injectCustomReadingUseCase.execute(request.sensorId(), request.vibrationValue());
-        return ResponseEntity.ok(ApiResponse.success("Lectura inyectada hacia Kafka exitosamente.", mapper.toResponse(dto)));
+        int count = request.resolvedBurstCount();
+        TelemetryEventDto lastDto = null;
+        for (int i = 0; i < count; i++) {
+            lastDto = injectCustomReadingUseCase.execute(request.sensorId(), request.vibrationValue());
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                String.format("Lectura(s) inyectada(s) hacia Kafka exitosamente (ráfaga=%d).", count),
+                mapper.toResponse(lastDto)
+        ));
     }
 
     @GetMapping("/sensors")

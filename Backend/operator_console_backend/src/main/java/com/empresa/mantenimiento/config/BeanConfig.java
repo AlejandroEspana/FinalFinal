@@ -1,6 +1,9 @@
 package com.empresa.mantenimiento.config;
 
+import com.empresa.mantenimiento.domain.service.PendingAlertsRegistryDomainService;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
@@ -23,6 +26,11 @@ public class BeanConfig implements WebSocketMessageBrokerConfigurer {
 
     @Value("${app.rabbitmq.queues.operator-alerts:operator_console_alerts_queue}")
     private String queueName;
+
+    @Bean
+    public PendingAlertsRegistryDomainService pendingAlertsRegistryDomainService() {
+        return new PendingAlertsRegistryDomainService();
+    }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
@@ -56,6 +64,10 @@ public class BeanConfig implements WebSocketMessageBrokerConfigurer {
 
     @Bean
     public ObjectMapper objectMapper() {
-        return new ObjectMapper().registerModule(new JavaTimeModule());
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        return mapper;
     }
 }

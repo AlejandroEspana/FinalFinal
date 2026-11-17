@@ -1,14 +1,14 @@
 package com.empresa.mantenimiento.presentation.controller;
 
+import com.empresa.mantenimiento.application.dto.ActuatorExecutionDto;
 import com.empresa.mantenimiento.application.service.ActuatorOrchestrationService;
 import com.empresa.mantenimiento.presentation.mapper.ActuatorPresentationMapper;
 import com.empresa.mantenimiento.presentation.response.ActuatorStatusResponse;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 @RestController
@@ -33,5 +33,16 @@ public class ActuatorStatusController {
                 .map(mapper::toResponse)
                 .toList();
         return ResponseEntity.ok(list);
+    }
+
+    @PostMapping("/{sensorId}/reset")
+    public ResponseEntity<ActuatorStatusResponse> resetMachine(
+            @PathVariable String sensorId,
+            @RequestBody(required = false) Map<String, String> body
+    ) {
+        String operatorId = (body != null && body.get("operatorId") != null) ? body.get("operatorId") : "operator";
+        String reason = (body != null && body.get("reason") != null) ? body.get("reason") : "Reactivación manual desde SCADA";
+        ActuatorExecutionDto dto = orchestrationService.resetMachine(sensorId, operatorId, reason);
+        return ResponseEntity.ok(mapper.toResponse(dto));
     }
 }

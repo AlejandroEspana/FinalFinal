@@ -1,5 +1,6 @@
 package com.empresa.mantenimiento.presentation.request;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -7,6 +8,7 @@ import jakarta.validation.constraints.Size;
 /**
  * DTO de Entrada (Bean Validation) para la decisión del operador humano.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record OperatorDecisionRequest(
         @NotBlank(message = "El alertId es obligatorio")
         String alertId,
@@ -21,7 +23,6 @@ public record OperatorDecisionRequest(
         )
         String chosenAction,
 
-        @NotBlank(message = "El operatorId es obligatorio")
         String operatorId,
 
         @Size(max = 500, message = "Las notas no pueden exceder 500 caracteres")

@@ -2,24 +2,34 @@ package com.empresa.mantenimiento.domain.service;
 
 import com.empresa.mantenimiento.domain.model.HumanActionRequest;
 import com.empresa.mantenimiento.domain.model.InteractiveAlertSession;
-import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-@Service
+/**
+ * Servicio de Dominio Puro (sin anotaciones de Spring) que administra las alertas interactivas
+ * pendientes de decisión humana con cota máxima de memoria (evitando crecimiento ilimitado).
+ */
 public class PendingAlertsRegistryDomainService {
+
+    public static final int MAX_PENDING_SESSIONS = 100;
 
     private final Map<String, InteractiveAlertSession> sessions = new ConcurrentHashMap<>();
 
-    public InteractiveAlertSession register(HumanActionRequest request) {
+    public synchronized InteractiveAlertSession register(HumanActionRequest request) {
+        if (sessions.size() >= MAX_PENDING_SESSIONS) {
+            sessions.values().stream()
+                    .min(Comparator.comparing(s -> s.getRequest().timestamp()))
+                    .ifPresent(oldest -> sessions.remove(oldest.getRequest().alertId().value()));
+        }
         InteractiveAlertSession session = new InteractiveAlertSession(request);
         sessions.put(request.alertId().value(), session);
         return session;
     }
 
-    public void resolve(String alertId) {
+    public synchronized void resolve(String alertId) {
         InteractiveAlertSession session = sessions.remove(alertId);
         if (session != null) {
             session.marcarComoResuelta();
@@ -30,6 +40,7 @@ public class PendingAlertsRegistryDomainService {
         return sessions.values().stream()
                 .filter(s -> !s.isResolved())
                 .map(InteractiveAlertSession::getRequest)
+                .sorted(Comparator.comparing(HumanActionRequest::timestamp).reversed())
                 .toList();
     }
 }

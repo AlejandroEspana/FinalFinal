@@ -28,6 +28,11 @@ public final class NormalSensorState implements SensorRiskState {
     }
 
     @Override
+    public boolean shouldEmitAlert(DetectionResult result) {
+        return result.requiresAlert();
+    }
+
+    @Override
     public boolean isOperationalSafe() {
         return true;
     }

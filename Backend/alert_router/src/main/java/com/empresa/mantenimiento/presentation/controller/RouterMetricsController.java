@@ -15,7 +15,6 @@ import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/v1/router")
-@CrossOrigin(origins = "*")
 public class RouterMetricsController {
 
     private final AlertRouterApplicationService routerApplicationService;

@@ -1,9 +1,10 @@
 package com.empresa.mantenimiento.domain.service;
 
 import com.empresa.mantenimiento.domain.model.MaintenanceExecutionTicket;
-import org.springframework.stereotype.Service;
 
-@Service
+/**
+ * Servicio de Dominio Puro (sin dependencias de Spring) que formatea el banner de ejecución técnica.
+ */
 public class MaintenanceSchedulingDomainService {
 
     public String formatMaintenanceBanner(MaintenanceExecutionTicket ticket) {

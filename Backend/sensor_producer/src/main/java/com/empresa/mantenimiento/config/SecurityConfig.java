@@ -1,5 +1,6 @@
 package com.empresa.mantenimiento.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -20,6 +21,12 @@ import org.springframework.security.web.SecurityFilterChain;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    @Value("${app.security.operator-username:operator}")
+    private String operatorUsername;
+
+    @Value("${app.security.operator-password:operator123}")
+    private String operatorPassword;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -29,7 +36,6 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/v1/simulation/**").permitAll()
-                        .requestMatchers("/actuator/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .httpBasic(Customizer.withDefaults());
@@ -39,8 +45,8 @@ public class SecurityConfig {
     @Bean
     public UserDetailsService userDetailsService(PasswordEncoder passwordEncoder) {
         UserDetails operator = User.builder()
-                .username("operator")
-                .password(passwordEncoder.encode("operator123"))
+                .username(operatorUsername)
+                .password(passwordEncoder.encode(operatorPassword))
                 .roles("OPERATOR")
                 .build();
         return new InMemoryUserDetailsManager(operator);

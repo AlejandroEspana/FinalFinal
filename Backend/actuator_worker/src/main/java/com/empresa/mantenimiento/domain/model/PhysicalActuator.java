@@ -2,10 +2,11 @@ package com.empresa.mantenimiento.domain.model;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Entidad de Dominio Rico que encapsula el estado del actuador físico y ejecuta
- * la transición de emergencia protegiendo sus invariantes.
+ * la transición de emergencia o reactivación protegiendo sus invariantes.
  */
 public class PhysicalActuator {
 
@@ -32,6 +33,22 @@ public class PhysicalActuator {
                 command.operatorId(),
                 command.reason(),
                 this.lastShutdownAt
+        );
+    }
+
+    public synchronized ActuatorExecutionRecord reactivarMaquina(String operatorId, String reason) {
+        String prev = currentState.stateName();
+        this.currentState = currentState.onReset();
+        Instant now = Instant.now();
+
+        return new ActuatorExecutionRecord(
+                "CMD-RESET-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
+                sensorId.value(),
+                prev,
+                this.currentState.stateName(),
+                (operatorId != null && !operatorId.isBlank()) ? operatorId : "operator",
+                (reason != null && !reason.isBlank()) ? reason : "Reactivación segura autorizada por operador",
+                now
         );
     }
 

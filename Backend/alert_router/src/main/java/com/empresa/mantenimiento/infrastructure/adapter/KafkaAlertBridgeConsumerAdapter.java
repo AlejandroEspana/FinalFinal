@@ -40,6 +40,7 @@ public class KafkaAlertBridgeConsumerAdapter {
             routerApplicationService.route(alert);
         } catch (Exception e) {
             log.error("Error procesando alerta desde Kafka topic {}: {}", record.topic(), e.getMessage(), e);
+            throw new IllegalStateException("Error procesando alerta en alert_router", e);
         }
     }
 }

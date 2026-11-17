@@ -14,11 +14,19 @@ import java.time.Instant;
 public class DecisionPresentationMapper {
 
     public OperatorDecisionRecord toDomainRecord(OperatorDecisionRequest request) {
+        return toDomainRecord(request, null);
+    }
+
+    public OperatorDecisionRecord toDomainRecord(OperatorDecisionRequest request, String authenticatedPrincipal) {
+        String effectiveOperatorId = (authenticatedPrincipal != null && !authenticatedPrincipal.isBlank())
+                ? authenticatedPrincipal.trim()
+                : (request.operatorId() != null && !request.operatorId().isBlank() ? request.operatorId().trim() : "operator");
+
         return new OperatorDecisionRecord(
                 new AlertId(request.alertId()),
                 new SensorId(request.sensorId()),
                 request.chosenAction(),
-                request.operatorId(),
+                effectiveOperatorId,
                 Instant.now(),
                 request.notes()
         );
