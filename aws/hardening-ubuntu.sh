@@ -96,6 +96,9 @@ sudo chmod 700 /root
 echo "[Fase 3] Configurando Firewall UFW y Fail2ban..."
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
+for old_port in 8080/tcp 8081/tcp 8082/tcp 8089/tcp 8091:8094/tcp; do
+    sudo ufw delete allow "$old_port" 2>/dev/null || true
+done
 sudo ufw limit 22/tcp comment 'SSH con Rate Limit anti-fuerza bruta'
 sudo ufw allow 80/tcp comment 'Nginx Reverse Proxy HTTP'
 sudo ufw allow 443/tcp comment 'Nginx Reverse Proxy HTTPS'
