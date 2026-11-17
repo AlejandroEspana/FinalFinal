@@ -3,16 +3,27 @@ import {
   Activity,
   AlertOctagon,
   AlertTriangle,
+  Bell,
   CheckCircle2,
   Clock,
   Cpu,
   Database,
+  Download,
+  ExternalLink,
   Flame,
+  Lock,
+  Mail,
+  MessageSquare,
+  Pause,
+  Play,
   Power,
+  Radio,
   RefreshCw,
   RotateCcw,
-  Radio,
+  Send,
+  Shield,
   ShieldCheck,
+  Smartphone,
   Wrench,
   XCircle,
   Zap
@@ -24,8 +35,11 @@ import {
   DelayedCountdownItem,
   HumanActionRequestDto,
   MaintenanceTicketResponseDto,
+  NotificationConfigDto,
+  NotificationRecordDto,
   OperatorCredentials,
-  SensorPlantStatusDto
+  SensorPlantStatusDto,
+  SimulationStateDto
 } from './types/contracts';
 import { useStompWebSocket } from './hooks/useStompWebSocket';
 import {
@@ -34,11 +48,16 @@ import {
   fetchActuatorHistoryAllReplicas,
   fetchAuditHistory,
   fetchMaintenanceTicketsAllReplicas,
+  fetchNotificationConfig,
+  fetchNotificationHistory,
   fetchPendingAlerts,
   fetchPlantSensorsStatus,
+  fetchSimulationState,
   injectTelemetryReading,
   resetSensorAndMachine,
-  submitOperatorDecision
+  submitOperatorDecision,
+  toggleSimulationState,
+  triggerTestNotification
 } from './services/api';
 
 const DEFAULT_SENSORS: SensorPlantStatusDto[] = [
@@ -84,6 +103,39 @@ const ACTION_LABELS: Record<string, { label: string; badgeClass: string; btnClas
   }
 };
 
+const HARDENING_LAYERS = [
+  {
+    layer: '1. Reverse Proxy & Dominio Propio',
+    tech: 'Nginx + TLS 1.2/1.3 + HSTS + Rate Limit',
+    detail: 'Dominio scada-ucc-alejandro.77.113.90.86.sslip.io. Todos los microservicios escuchan en 127.0.0.1 ocultando puertos internos.'
+  },
+  {
+    layer: '2. Blindaje SSH & Cuentas',
+    tech: '/etc/ssh/sshd_config.d/01-hardening.conf',
+    detail: 'PermitRootLogin no, PasswordAuthentication no, MaxAuthTries 3, LoginGraceTime 30, Banner legal /etc/issue.net.'
+  },
+  {
+    layer: '3. Autenticación PAM & Sudo',
+    tech: 'pwquality + faillock + /etc/sudoers.d/99-hardening',
+    detail: 'Defaults use_pty, timestamp_timeout=5, passwd_tries=3 y bloqueo tras 5 intentos fallidos (15 min).'
+  },
+  {
+    layer: '4. Firewall Host & IPS Fail2ban',
+    tech: 'UFW / nftables + Fail2ban (sshd, nginx, recidive)',
+    detail: 'Política deny incoming por defecto. Bloqueo automático incremental de IPs agresivas y escáneres.'
+  },
+  {
+    layer: '5. Hardening del Kernel Linux',
+    tech: '/etc/sysctl.d/99-hardening.conf + Coredump Off',
+    detail: 'ASLR completo (randomize_va_space=2), tcp_syncookies=1, rp_filter=1, kptr_restrict=2, dmesg_restrict=1.'
+  },
+  {
+    layer: '6. Auditoría Forense & Monitoreo',
+    tech: 'auditd + check-resources.sh + Lynis + sysstat',
+    detail: 'Reglas inmutables vigilando /etc/passwd, /etc/shadow, /etc/sudoers y cron de vigilancia de CPU/RAM/Disco cada 5m.'
+  }
+];
+
 export function App() {
   const [sensors, setSensors] = useState<SensorPlantStatusDto[]>(DEFAULT_SENSORS);
   const [alerts, setAlerts] = useState<HumanActionRequestDto[]>([]);
@@ -91,19 +143,27 @@ export function App() {
   const [actuatorLogs, setActuatorLogs] = useState<ActuatorStatusResponseDto[]>([]);
   const [maintenanceTickets, setMaintenanceTickets] = useState<MaintenanceTicketResponseDto[]>([]);
   const [delayedCountdowns, setDelayedCountdowns] = useState<DelayedCountdownItem[]>([]);
+  const [simState, setSimState] = useState<SimulationStateDto>({ enabled: true, rateMs: 12000 });
 
-  // Credenciales reales HTTP Basic para action_dispatcher (:8080)
+  const [notifConfig, setNotifConfig] = useState<NotificationConfigDto>({
+    email: 'alejandro.espaname@campusucc.edu.co',
+    phone: '+573154613867',
+    ntfyTopic: 'scada-ucc-alejandro-573154613867',
+    ntfySubscribeUrl: 'https://ntfy.sh/scada-ucc-alejandro-573154613867',
+    enabled: true
+  });
+  const [notifHistory, setNotifHistory] = useState<NotificationRecordDto[]>([]);
+  const [sendingTestNotif, setSendingTestNotif] = useState(false);
+
   const [credentials, setCredentials] = useState<OperatorCredentials>({
     username: 'operator',
     password: 'operator123'
   });
 
-  // Notas personalizadas por alerta
   const [notesByAlert, setNotesByAlert] = useState<Record<string, string>>({});
   const [submittingAlertId, setSubmittingAlertId] = useState<string | null>(null);
   const [sensorFilter, setSensorFilter] = useState<string>('ALL');
 
-  // Banners de feedback real (sin simulaciones falsas)
   const [feedbackBanner, setFeedbackBanner] = useState<{
     type: 'success' | 'error' | 'info';
     title: string;
@@ -118,7 +178,6 @@ export function App() {
     return String(raw ?? '');
   };
 
-  // Callback WebSocket #1: Estado de planta en tiempo real (Kafka -> plant_monitor_backend :8081)
   const handlePlantStatusMessage = useCallback((incoming: SensorPlantStatusDto) => {
     const cleanSensorId = normalizeId(incoming.sensorId);
     setSensors((prev) => {
@@ -135,7 +194,6 @@ export function App() {
     });
   }, []);
 
-  // Callback WebSocket #2: Alertas interactivas para decisión humana (RabbitMQ Fanout -> operator_console_backend :8082)
   const handleOperatorAlertMessage = useCallback((incoming: HumanActionRequestDto) => {
     const cleanAlertId = normalizeId(incoming.alertId);
     const cleanSensorId = normalizeId(incoming.sensorId);
@@ -154,26 +212,30 @@ export function App() {
 
   const plantWs = useStompWebSocket<SensorPlantStatusDto>({
     url: WS_ENDPOINTS.plantPrimary,
-    fallbackUrl: WS_ENDPOINTS.plantProxy,
+    fallbackUrl: WS_ENDPOINTS.plantFallback,
     topic: '/topic/plant-status',
     onMessage: handlePlantStatusMessage
   });
 
   const alertsWs = useStompWebSocket<HumanActionRequestDto>({
     url: WS_ENDPOINTS.alertsPrimary,
-    fallbackUrl: WS_ENDPOINTS.alertsProxy,
+    fallbackUrl: WS_ENDPOINTS.alertsFallback,
     topic: '/topic/operator-alerts',
     onMessage: handleOperatorAlertMessage
   });
 
   const refreshAllData = useCallback(async () => {
-    const [plantRes, alertsRes, auditRes, actuatorRes, maintRes] = await Promise.allSettled([
-      fetchPlantSensorsStatus(),
-      fetchPendingAlerts(),
-      fetchAuditHistory(credentials),
-      fetchActuatorHistoryAllReplicas(),
-      fetchMaintenanceTicketsAllReplicas()
-    ]);
+    const [plantRes, alertsRes, auditRes, actuatorRes, maintRes, simRes, notifCfgRes, notifHistRes] =
+      await Promise.allSettled([
+        fetchPlantSensorsStatus(),
+        fetchPendingAlerts(),
+        fetchAuditHistory(credentials),
+        fetchActuatorHistoryAllReplicas(),
+        fetchMaintenanceTicketsAllReplicas(),
+        fetchSimulationState(),
+        fetchNotificationConfig(credentials),
+        fetchNotificationHistory(credentials)
+      ]);
 
     if (plantRes.status === 'fulfilled' && Array.isArray(plantRes.value) && plantRes.value.length > 0) {
       setSensors(
@@ -209,15 +271,26 @@ export function App() {
     if (maintRes.status === 'fulfilled') {
       setMaintenanceTickets(maintRes.value);
     }
+
+    if (simRes.status === 'fulfilled' && simRes.value) {
+      setSimState(simRes.value);
+    }
+
+    if (notifCfgRes.status === 'fulfilled' && notifCfgRes.value) {
+      setNotifConfig(notifCfgRes.value);
+    }
+
+    if (notifHistRes.status === 'fulfilled' && Array.isArray(notifHistRes.value)) {
+      setNotifHistory(notifHistRes.value);
+    }
   }, [credentials]);
 
   useEffect(() => {
     refreshAllData();
-    const pollInterval = window.setInterval(refreshAllData, 4000);
+    const pollInterval = window.setInterval(refreshAllData, 5000);
     return () => window.clearInterval(pollInterval);
   }, [refreshAllData]);
 
-  // Temporizador visual para órdenes diferidas con x-delay en RabbitMQ
   useEffect(() => {
     if (delayedCountdowns.length === 0) return;
     const timer = window.setInterval(() => {
@@ -229,6 +302,28 @@ export function App() {
     }, 250);
     return () => window.clearInterval(timer);
   }, [delayedCountdowns.length]);
+
+  const handleToggleSimulation = async () => {
+    try {
+      const updated = await toggleSimulationState(!simState.enabled);
+      setSimState(updated);
+      setFeedbackBanner({
+        type: 'info',
+        title: updated.enabled
+          ? `Simulación automática Kafka ACTIVADA (cada ${updated.rateMs / 1000}s)`
+          : 'Simulación automática Kafka PAUSADA (Modo Manual para Demostración)',
+        detail: updated.enabled
+          ? '97% lecturas normales, 2% advertencia, 1% crítico para evitar saturación de alertas.'
+          : 'Ahora solo se emitirán alertas cuando presiones los botones manuales en cada sensor.'
+      });
+    } catch (err) {
+      setFeedbackBanner({
+        type: 'error',
+        title: 'No se pudo cambiar el estado del simulador',
+        detail: err instanceof Error ? err.message : String(err)
+      });
+    }
+  };
 
   const handleInjectSpike = async (sensorId: string, vibrationValue: number, burstCount: number) => {
     try {
@@ -286,7 +381,6 @@ export function App() {
         credentials
       );
 
-      // Remover alerta resuelta del estado local
       setAlerts((prev) => prev.filter((a) => a.alertId !== alert.alertId));
 
       if (chosenAction === 'RECONOCER_Y_ESPERAR_24H') {
@@ -306,20 +400,66 @@ export function App() {
 
       setFeedbackBanner({
         type: 'success',
-        title: `Decisión Auditada en PostgreSQL (ID #${result.auditRecordId}) y Despachada`,
-        detail: `Sensor: ${result.sensorId} | Acción: ${result.actionDispatched} | Destino RabbitMQ: ${result.routingTarget}`
+        title: `Decisión Auditada en PostgreSQL (#${result.auditRecordId}), Despachada a RabbitMQ y Notificada`,
+        detail: `Sensor: ${result.sensorId} | Acción: ${result.actionDispatched} | Notificado a ${notifConfig.phone} y ${notifConfig.email}`
       });
 
       await refreshAllData();
     } catch (err) {
       setFeedbackBanner({
         type: 'error',
-        title: `Fallo real al procesar decisión en action_dispatcher (:8080)`,
+        title: `Fallo real al procesar decisión en action_dispatcher`,
         detail: err instanceof Error ? err.message : String(err)
       });
     } finally {
       setSubmittingAlertId(null);
     }
+  };
+
+  const handleSendTestNotification = async () => {
+    setSendingTestNotif(true);
+    try {
+      const rec = await triggerTestNotification(credentials);
+      setFeedbackBanner({
+        type: 'success',
+        title: `Alerta Multicanal Despachada (${rec.notificationId})`,
+        detail: `Enviada a ${rec.recipient} — Estado: ${rec.deliveryStatus}`
+      });
+      await refreshAllData();
+    } catch (err) {
+      setFeedbackBanner({
+        type: 'error',
+        title: 'Error enviando notificación de prueba',
+        detail: err instanceof Error ? err.message : String(err)
+      });
+    } finally {
+      setSendingTestNotif(false);
+    }
+  };
+
+  const handleExportAuditCsv = () => {
+    if (auditLogs.length === 0) return;
+    const headers = ['ID', 'Alerta', 'Sensor', 'Accion', 'Operador', 'Estado', 'Cola_RabbitMQ', 'Delay_Ms', 'Notas', 'Fecha_UTC'];
+    const rows = auditLogs.map((r) => [
+      r.id,
+      r.alertId,
+      r.sensorId,
+      r.chosenAction,
+      r.operatorId,
+      r.status,
+      r.routingTarget,
+      r.delayMillis,
+      `"${(r.notes || '').replace(/"/g, '""')}"`,
+      r.recordedAt
+    ]);
+    const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `auditoria_mantenimiento_ucc_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleDismissOnly = async (alertId: string) => {
@@ -333,6 +473,18 @@ export function App() {
         detail: err instanceof Error ? err.message : String(err)
       });
     }
+  };
+
+  const buildAlertWhatsAppUrl = (alert: HumanActionRequestDto) => {
+    const cleanPhone = notifConfig.phone.replace(/[^0-9]/g, '') || '573154613867';
+    const text =
+      `🚨 *ALERTA SCADA IoT INDUSTRIAL (UCC)*\n` +
+      `• *Alerta:* ${alert.alertId}\n` +
+      `• *Sensor:* ${alert.sensorId}\n` +
+      `• *Severidad:* ${alert.severity} (${Number(alert.triggerValue).toFixed(2)} mm/s)\n` +
+      `• *Detalle:* ${alert.description}\n` +
+      `• *Opciones:* ${alert.availableOptions.join(', ')}`;
+    return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
   };
 
   const filteredAudits = useMemo(() => {
@@ -395,44 +547,55 @@ export function App() {
                 <h1 className="text-lg font-bold tracking-tight text-white">
                   SCADA IoT Industrial — Mantenimiento Predictivo Interactivo
                 </h1>
-                <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                  React 18 + TypeScript
+                <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                  AWS EC2 + Hardening OS
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Arquitectura Híbrida: Apache Kafka (Flujo Stateful) • RabbitMQ (Decisiones + Delayed Exchange) • PostgreSQL (Auditoría ACID)
+                Kafka (Stateful) • RabbitMQ (Fanout + Delayed x-delay) • PostgreSQL (ACID) • Alertas a {notifConfig.phone} y {notifConfig.email}
               </p>
             </div>
           </div>
 
-          {/* Estado de Conexiones STOMP WebSocket + Selector de Sesión Operador */}
-          <div className="flex flex-wrap items-center gap-3">
+          {/* Controles de Estado STOMP + Pausa Simulación + Sesión Auth */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              onClick={handleToggleSimulation}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                simState.enabled
+                  ? 'bg-cyan-950/50 border-cyan-500/40 text-cyan-300 hover:bg-cyan-900/50'
+                  : 'bg-amber-950/50 border-amber-500/40 text-amber-300 hover:bg-amber-900/50'
+              }`}
+              title="Pausa o reanuda la emisión aleatoria cada 12s en sensor_producer"
+            >
+              {simState.enabled ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+              <span>{simState.enabled ? 'Simulación Auto (12s): ON' : 'Simulación Auto: PAUSADA'}</span>
+            </button>
+
             <div
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono ${
                 plantWs.connected
                   ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
                   : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
               }`}
             >
               <Radio className="w-3.5 h-3.5 animate-pulse" />
-              <span>WS Planta (:8081): {plantWs.connected ? 'CONECTADO' : 'RECONECTANDO'}</span>
+              <span>WS Planta: {plantWs.connected ? 'ONLINE' : 'SYNC'}</span>
             </div>
 
             <div
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono ${
                 alertsWs.connected
                   ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
                   : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
               }`}
             >
               <Radio className="w-3.5 h-3.5 animate-pulse" />
-              <span>WS Alertas (:8082): {alertsWs.connected ? 'CONECTADO' : 'RECONECTANDO'}</span>
+              <span>WS Alertas: {alertsWs.connected ? 'ONLINE' : 'SYNC'}</span>
             </div>
 
-            {/* Selector de Operador Autenticado (HTTP Basic) */}
             <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs">
               <ShieldCheck className="w-4 h-4 text-cyan-400" />
-              <span className="text-slate-400">Sesión Auth:</span>
               <select
                 value={credentials.username}
                 onChange={(e) => {
@@ -454,7 +617,6 @@ export function App() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              Sincronizar
             </button>
           </div>
         </div>
@@ -497,7 +659,7 @@ export function App() {
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-400 uppercase">Sensores Activos</p>
+              <p className="text-xs text-slate-400 uppercase">Sensores Normales</p>
               <p className="text-2xl font-bold text-emerald-400 mt-1">{counts.normal} / 10</p>
             </div>
             <Activity className="w-8 h-8 text-emerald-500/40" />
@@ -521,7 +683,7 @@ export function App() {
 
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-400 uppercase">Alertas Pendientes</p>
+              <p className="text-xs text-slate-400 uppercase">Alertas Activas</p>
               <p className="text-2xl font-bold text-cyan-400 mt-1">{alerts.length}</p>
             </div>
             <Flame className="w-8 h-8 text-cyan-500/40" />
@@ -547,7 +709,7 @@ export function App() {
                   Mapa de Estado Materializado de la Planta (10 Sensores — Kafka Stateful)
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Particionado por <code className="text-cyan-300">sensor_id</code> en topic <code className="text-cyan-300">sensor_data</code>. Usa los botones de cada tarjeta para inyectar fallas reales.
+                  Ciclo realista de 12s (97% normal) para evitar saturación. Usa los botones de cada sensor para disparar alertas de prueba al instante.
                 </p>
               </div>
             </div>
@@ -574,7 +736,6 @@ export function App() {
                         </span>
                       </div>
 
-                      {/* Medidor de vibración RMS */}
                       <div className="mt-3 flex items-baseline justify-between">
                         <div>
                           <span className="text-2xl font-mono font-extrabold text-white">
@@ -599,12 +760,10 @@ export function App() {
                       </p>
                     </div>
 
-                    {/* Botones de Acción Directa sobre el Sensor (Kafka Producer + Reactivación) */}
                     <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5">
                       <button
                         onClick={() => handleInjectSpike(sensor.sensorId, 96.4, 1)}
                         disabled={isHalted}
-                        title="Inyecta 1 lectura de 96.4 mm/s (>90) en Kafka para disparar Regla 1 (CRÍTICA)"
                         className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 disabled:opacity-40 transition"
                       >
                         ⚡ Pico &gt;90
@@ -613,7 +772,6 @@ export function App() {
                       <button
                         onClick={() => handleInjectSpike(sensor.sensorId, 82.0, 3)}
                         disabled={isHalted}
-                        title="Inyecta ráfaga de 3 lecturas de 82.0 mm/s (>75) en Kafka para disparar Regla 2 (ADVERTENCIA)"
                         className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 disabled:opacity-40 transition"
                       >
                         ⚠️ Ráfaga 3x &gt;75
@@ -622,7 +780,6 @@ export function App() {
                       {(isHalted || sensor.severity !== 'NORMAL') && (
                         <button
                           onClick={() => handleResetMachine(sensor.sensorId)}
-                          title="Reactiva la máquina física (RUNNING) y reinicia la ventana móvil del sensor"
                           className="text-[11px] font-semibold px-2.5 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 transition"
                         >
                           <RotateCcw className="w-3 h-3" />
@@ -636,7 +793,7 @@ export function App() {
             </div>
           </section>
 
-          {/* Columna Derecha (5 cols): Consola Interactiva de Decisiones del Operador (RabbitMQ -> WebSocket :8082) */}
+          {/* Columna Derecha (5 cols): Consola Interactiva de Decisiones del Operador */}
           <section className="lg:col-span-5 bg-slate-900/60 border border-slate-800 rounded-2xl p-5 flex flex-col">
             <div className="pb-4 border-b border-slate-800 flex items-center justify-between">
               <div>
@@ -645,7 +802,7 @@ export function App() {
                   Consola Interactiva del Operador (RabbitMQ Fanout)
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Opciones generadas polimórficamente por <code className="text-amber-300">alert_router</code> y despachadas a <code className="text-amber-300">POST /decide</code>.
+                  Opciones dinámicas desde <code className="text-amber-300">alert_router</code> con notificación automática a móvil y correo.
                 </p>
               </div>
               <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-slate-800 text-cyan-300 border border-slate-700">
@@ -653,7 +810,6 @@ export function App() {
               </span>
             </div>
 
-            {/* Temporizadores activos de RabbitMQ Delayed Message Exchange (x-delay) */}
             {delayedCountdowns.length > 0 && (
               <div className="mt-4 space-y-2">
                 {delayedCountdowns.map((item) => {
@@ -682,14 +838,13 @@ export function App() {
               </div>
             )}
 
-            {/* Lista de Alertas Pendientes */}
             <div className="mt-4 space-y-3.5 max-h-[620px] overflow-y-auto pr-1 flex-1">
               {alerts.length === 0 ? (
                 <div className="h-64 flex flex-col items-center justify-center text-center border border-dashed border-slate-800 rounded-xl p-6 text-slate-400">
                   <CheckCircle2 className="w-10 h-10 text-emerald-500/60 mb-2" />
                   <p className="text-sm font-medium text-slate-300">Sin alertas pendientes de decisión humana</p>
                   <p className="text-xs text-slate-500 mt-1">
-                    Haz clic en &ldquo;⚡ Pico &gt;90&rdquo; o &ldquo;⚠️ Ráfaga 3x &gt;75&rdquo; en cualquier sensor para disparar el flujo completo Kafka → RabbitMQ → WebSocket.
+                    Haz clic en &ldquo;⚡ Pico &gt;90&rdquo; o &ldquo;⚠️ Ráfaga 3x &gt;75&rdquo; en cualquier sensor para disparar el flujo completo.
                   </p>
                 </div>
               ) : (
@@ -711,9 +866,7 @@ export function App() {
                           <div className="flex items-center gap-2">
                             <span
                               className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                                isCritical
-                                  ? 'bg-red-500 text-white'
-                                  : 'bg-amber-400 text-slate-950'
+                                isCritical ? 'bg-red-500 text-white' : 'bg-amber-400 text-slate-950'
                               }`}
                             >
                               {alert.severity}
@@ -738,7 +891,6 @@ export function App() {
                         </div>
                       </div>
 
-                      {/* Campo de Notas de Auditoría */}
                       <div className="mt-3">
                         <input
                           type="text"
@@ -754,7 +906,6 @@ export function App() {
                         />
                       </div>
 
-                      {/* Opciones Polimórficas enviadas por alert_router en availableOptions */}
                       <div className="mt-3 flex flex-col gap-2">
                         {alert.availableOptions.map((option) => {
                           const meta = ACTION_LABELS[option] ?? {
@@ -775,12 +926,24 @@ export function App() {
                           );
                         })}
 
-                        <button
-                          onClick={() => handleDismissOnly(alert.alertId)}
-                          className="text-[11px] text-slate-400 hover:text-slate-200 self-end mt-0.5"
-                        >
-                          Descartar de la vista
-                        </button>
+                        <div className="flex items-center justify-between pt-1">
+                          <a
+                            href={buildAlertWhatsAppUrl(alert)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400 hover:text-emerald-300"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            Enviar a WhatsApp ({notifConfig.phone})
+                          </a>
+
+                          <button
+                            onClick={() => handleDismissOnly(alert.alertId)}
+                            className="text-[11px] text-slate-400 hover:text-slate-200"
+                          >
+                            Descartar de la vista
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -790,9 +953,146 @@ export function App() {
           </section>
         </div>
 
-        {/* Sección Inferior 1: Ejecución en Workers Concurrentes (actuator_worker + maintenance_worker) */}
+        {/* NUEVA SECCIÓN PLUS: Centro de Notificaciones Multicanal (Móvil / WhatsApp / Email) + Hardening Ubuntu Server */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Panel Notificaciones (6 cols) */}
+          <section className="lg:col-span-6 bg-slate-900/60 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-5 h-5 text-emerald-400" />
+                  <div>
+                    <h3 className="text-sm font-bold text-white">
+                      Centro de Alertas Multicanal (Móvil / WhatsApp / Correo Institucional)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Despacho automático en alertas críticas (cooldown 60s) y resoluciones del operador.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleSendTestNotification}
+                  disabled={sendingTestNotif}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {sendingTestNotif ? 'Enviando...' : 'Probar Alerta en Vivo'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
+                  <div className="flex items-center gap-1.5 text-cyan-400 font-semibold">
+                    <Mail className="w-4 h-4" />
+                    <span>Correo Institucional</span>
+                  </div>
+                  <p className="font-mono text-slate-200 mt-1 break-all">{notifConfig.email}</p>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                    <Smartphone className="w-4 h-4" />
+                    <span>Móvil / WhatsApp</span>
+                  </div>
+                  <p className="font-mono text-slate-200 mt-1">{notifConfig.phone}</p>
+                </div>
+
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
+                  <div className="flex items-center justify-between text-purple-400 font-semibold">
+                    <span>Push Móvil (ntfy.sh)</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </div>
+                  <a
+                    href={notifConfig.ntfySubscribeUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-purple-300 hover:underline mt-1 block truncate"
+                  >
+                    {notifConfig.ntfyTopic}
+                  </a>
+                </div>
+              </div>
+
+              <div className="mt-4 max-h-48 overflow-y-auto space-y-2">
+                {notifHistory.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-6 text-center">
+                    Haz clic en &ldquo;Probar Alerta en Vivo&rdquo; o resuelve una alerta para ver el historial de despacho.
+                  </p>
+                ) : (
+                  notifHistory.map((n) => (
+                    <div
+                      key={n.notificationId}
+                      className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5 text-xs flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-emerald-400">{n.notificationId}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300">
+                            {n.deliveryStatus}
+                          </span>
+                        </div>
+                        <p className="text-slate-200 font-medium truncate mt-0.5">{n.subject}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a
+                          href={n.whatsappDirectUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-semibold text-[11px]"
+                        >
+                          WhatsApp
+                        </a>
+                        <span className="font-mono text-[10px] text-slate-400">
+                          {new Date(n.sentAt).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Panel Hardening Ubuntu Server 24.04 LTS en AWS EC2 (6 cols) */}
+          <section className="lg:col-span-6 bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-cyan-400" />
+                <div>
+                  <h3 className="text-sm font-bold text-white">
+                    Hardening de Ubuntu Server 24.04 LTS en AWS EC2 (Defensa en Profundidad)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Capas de seguridad de Sistemas Operativos activas en el servidor de producción
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                <Lock className="w-3 h-3" /> 6 Capas Activas
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-3.5">
+              {HARDENING_LAYERS.map((item) => (
+                <div
+                  key={item.layer}
+                  className="rounded-xl bg-slate-950/70 border border-slate-800/90 p-3 text-xs"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-cyan-300">{item.layer}</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  </div>
+                  <p className="font-mono text-[10px] text-purple-300 mt-0.5">{item.tech}</p>
+                  <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {/* Sección Inferior 1: Ejecución en Workers Concurrentes */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Actuator Worker History */}
           <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -802,7 +1102,7 @@ export function App() {
                     Actuator Workers — Paradas de Emergencia y Reactivaciones (2 Réplicas)
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Cola RabbitMQ: <code className="text-red-300">critical_actions_queue</code> (Puertos 8091-8092)
+                    Cola RabbitMQ: <code className="text-red-300">critical_actions_queue</code> (127.0.0.1:8091-8092)
                   </p>
                 </div>
               </div>
@@ -840,7 +1140,6 @@ export function App() {
             </div>
           </section>
 
-          {/* Maintenance Worker Tickets */}
           <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -850,7 +1149,7 @@ export function App() {
                     Maintenance Workers — Órdenes Inmediatas y Diferidas x-delay (2 Réplicas)
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Cola RabbitMQ: <code className="text-amber-300">maintenance_queue</code> + <code className="text-purple-300">delayed_actions_exchange</code> (Puertos 8093-8094)
+                    Cola RabbitMQ: <code className="text-amber-300">maintenance_queue</code> + <code className="text-purple-300">delayed_actions_exchange</code> (127.0.0.1:8093-8094)
                   </p>
                 </div>
               </div>
@@ -895,35 +1194,46 @@ export function App() {
           </section>
         </div>
 
-        {/* Sección Inferior 2: Tabla de Auditoría Transaccional en PostgreSQL (operator_decision_audit) */}
+        {/* Sección Inferior 2: Tabla de Auditoría Transaccional en PostgreSQL */}
         <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
           <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
             <div className="flex items-center gap-2.5">
               <Database className="w-5 h-5 text-purple-400" />
               <div>
                 <h2 className="text-base font-bold text-white">
-                  Registro Histórico de Auditoría Transaccional en PostgreSQL (Tabla <code className="text-purple-300">operator_decision_audit</code>)
+                  Registro Histórico de Auditoría Transaccional en PostgreSQL (<code className="text-purple-300">operator_decision_audit</code>)
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Consultado en tiempo real desde <code className="text-purple-300">GET /api/v1/audit</code> con autenticación HTTP Basic (<code className="text-cyan-300">{credentials.username}</code>).
+                  Persistencia ACID verificada antes del despacho a RabbitMQ • Autenticado como <code className="text-cyan-300">{credentials.username}</code>.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-400">Filtrar por Sensor:</span>
-              <select
-                value={sensorFilter}
-                onChange={(e) => setSensorFilter(e.target.value)}
-                className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-mono"
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">Sensor:</span>
+                <select
+                  value={sensorFilter}
+                  onChange={(e) => setSensorFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-mono"
+                >
+                  <option value="ALL">TODOS ({auditLogs.length})</option>
+                  {sensors.map((s) => (
+                    <option key={s.sensorId} value={s.sensorId}>
+                      {s.sensorId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={handleExportAuditCsv}
+                disabled={auditLogs.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 font-semibold transition disabled:opacity-40"
               >
-                <option value="ALL">TODOS ({auditLogs.length})</option>
-                {sensors.map((s) => (
-                  <option key={s.sensorId} value={s.sensorId}>
-                    {s.sensorId}
-                  </option>
-                ))}
-              </select>
+                <Download className="w-3.5 h-3.5" />
+                Exportar Acta CSV
+              </button>
             </div>
           </div>
 

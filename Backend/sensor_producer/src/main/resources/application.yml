@@ -12,7 +12,7 @@ spring:
 app:
   simulation:
     enabled: ${APP_SIMULATION_ENABLED:true}
-    rate-ms: ${APP_SIMULATION_INTERVAL_MS:${SIMULATION_RATE_MS:3000}}
+    rate-ms: ${APP_SIMULATION_INTERVAL_MS:${SIMULATION_RATE_MS:12000}}
   security:
     operator-username: ${APP_OPERATOR_USER:operator}
     operator-password: ${APP_OPERATOR_PASS:operator123}

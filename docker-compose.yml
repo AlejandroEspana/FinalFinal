@@ -1,8 +1,6 @@
-version: "3.9"
-
 services:
   # ============================================================================
-  # 1. INFRAESTRUCTURA DE DATOS Y MENSAJERÍA (PostgreSQL, Zookeeper, Kafka, RabbitMQ)
+  # 1. INFRAESTRUCTURA DE DATOS Y MENSAJERÍA (Confinados en 127.0.0.1)
   # ============================================================================
   postgres:
     image: postgres:16-alpine
@@ -102,7 +100,7 @@ services:
       - iot_industrial_net
 
   # ============================================================================
-  # 2. MICROSERVICIOS BACKEND (Java 17 + Spring Boot 3.3 + Dominio Rico + SOLID)
+  # 2. MICROSERVICIOS BACKEND (Confinados en 127.0.0.1 detrás de Nginx Reverse Proxy)
   # ============================================================================
   sensor_producer:
     build:
@@ -114,14 +112,14 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8089:8089"
+      - "127.0.0.1:8089:8089"
     environment:
       SERVER_PORT: 8089
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       APP_SIMULATION_ENABLED: "true"
-      APP_SIMULATION_INTERVAL_MS: 3000
-      SIMULATION_RATE_MS: 3000
+      APP_SIMULATION_INTERVAL_MS: 12000
+      SIMULATION_RATE_MS: 12000
     deploy:
       resources:
         limits:
@@ -140,7 +138,7 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8088:8088"
+      - "127.0.0.1:8088:8088"
     environment:
       SERVER_PORT: 8088
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -165,7 +163,7 @@ services:
       rabbitmq:
         condition: service_healthy
     ports:
-      - "8087:8087"
+      - "127.0.0.1:8087:8087"
     environment:
       SERVER_PORT: 8087
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -195,7 +193,7 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"
     environment:
       SERVER_PORT: 8081
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -218,7 +216,7 @@ services:
       rabbitmq:
         condition: service_healthy
     ports:
-      - "8082:8082"
+      - "127.0.0.1:8082:8082"
     environment:
       SERVER_PORT: 8082
       RABBITMQ_HOST: rabbitmq
@@ -248,7 +246,7 @@ services:
       rabbitmq:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       SERVER_PORT: 8080
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mantenimiento_db}
@@ -283,7 +281,7 @@ services:
       rabbitmq:
         condition: service_healthy
     ports:
-      - "8091-8092:8085"
+      - "127.0.0.1:8091-8092:8085"
     environment:
       SERVER_PORT: 8085
       RABBITMQ_HOST: rabbitmq
@@ -311,7 +309,7 @@ services:
       rabbitmq:
         condition: service_healthy
     ports:
-      - "8093-8094:8086"
+      - "127.0.0.1:8093-8094:8086"
     environment:
       SERVER_PORT: 8086
       RABBITMQ_HOST: rabbitmq
@@ -331,7 +329,7 @@ services:
       - iot_industrial_net
 
   # ============================================================================
-  # 3. FRONTEND DASHBOARD (React 18 + TypeScript + Vite + Nginx Reverse Proxy)
+  # 3. FRONTEND DASHBOARD + REVERSE PROXY NGINX (Único punto de entrada público)
   # ============================================================================
   frontend_dashboard:
     build:
@@ -344,6 +342,7 @@ services:
       - operator_console_backend
       - action_dispatcher
     ports:
+      - "80:80"
       - "3000:80"
     deploy:
       resources:

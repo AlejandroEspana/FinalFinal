@@ -43,6 +43,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/decide", "/api/v1/decide").hasAnyRole("OPERATOR", "ADMIN")
                         .requestMatchers("/api/v1/audit/**").hasAnyRole("OPERATOR", "ADMIN")
+                        .requestMatchers("/api/v1/notifications/**").hasAnyRole("OPERATOR", "ADMIN")
                         .anyRequest().authenticated()
                 )
                 .httpBasic(Customizer.withDefaults());

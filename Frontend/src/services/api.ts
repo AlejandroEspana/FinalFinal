@@ -4,19 +4,23 @@ import {
   DecisionDispatchedResponseDto,
   HumanActionRequestDto,
   MaintenanceTicketResponseDto,
+  NotificationConfigDto,
+  NotificationRecordDto,
   OperatorCredentials,
   OperatorDecisionRequestDto,
-  SensorPlantStatusDto
+  SensorPlantStatusDto,
+  SimulationStateDto
 } from '../types/contracts';
 
 const hostname = typeof window !== 'undefined' ? window.location.hostname || 'localhost' : 'localhost';
 const wsProtocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
+// Prioriza el Reverse Proxy Nginx (/ws-plant y /ws-alerts) para ocultar puertos internos y soportar HTTPS (wss://)
 export const WS_ENDPOINTS = {
-  plantPrimary: `${wsProtocol}//${hostname}:8081/ws-plant`,
-  plantProxy: `${wsProtocol}//${window.location.host}/ws-plant`,
-  alertsPrimary: `${wsProtocol}//${hostname}:8082/ws-alerts`,
-  alertsProxy: `${wsProtocol}//${window.location.host}/ws-alerts`
+  plantPrimary: `${wsProtocol}//${window.location.host}/ws-plant`,
+  plantFallback: `${wsProtocol}//${hostname}:8081/ws-plant`,
+  alertsPrimary: `${wsProtocol}//${window.location.host}/ws-alerts`,
+  alertsFallback: `${wsProtocol}//${hostname}:8082/ws-alerts`
 };
 
 function buildBasicAuthHeader(creds: OperatorCredentials): string {
@@ -35,7 +39,6 @@ async function fetchWithFallback<T>(primaryUrl: string, fallbackUrl: string, ini
     }
     return (await res.json()) as T;
   } catch (primaryErr) {
-    // Si el error fue un 401/403/400 explícito del servidor, no ocultarlo: propagarlo directamente
     if (primaryErr instanceof Error && /^HTTP (400|401|403|422)/.test(primaryErr.message)) {
       throw primaryErr;
     }
@@ -55,6 +58,25 @@ export async function fetchPlantSensorsStatus(): Promise<SensorPlantStatusDto[]>
   return fetchWithFallback<SensorPlantStatusDto[]>(
     `/api/plant/status`,
     `http://${hostname}:8081/api/v1/sensors/status`
+  );
+}
+
+export async function fetchSimulationState(): Promise<SimulationStateDto> {
+  return fetchWithFallback<SimulationStateDto>(
+    `/api/simulation/state`,
+    `http://${hostname}:8089/api/v1/simulation/state`
+  );
+}
+
+export async function toggleSimulationState(enabled?: boolean): Promise<SimulationStateDto> {
+  return fetchWithFallback<SimulationStateDto>(
+    `/api/simulation/toggle`,
+    `http://${hostname}:8089/api/v1/simulation/toggle`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(enabled !== undefined ? { enabled } : {})
+    }
   );
 }
 
@@ -112,14 +134,12 @@ export async function submitOperatorDecision(
     }
   );
 
-  // Limpiar la alerta pendiente en operator_console_backend para que no crezca la memoria
   try {
     await dismissPendingAlert(request.alertId);
   } catch (e) {
     console.warn('No se pudo eliminar la alerta de operator_console_backend:', e);
   }
 
-  // Si es parada de emergencia inmediata, reflejar estado detenido en plant_monitor_backend
   if (request.chosenAction === 'APAGADO_INMEDIATO') {
     try {
       await fetchWithFallback(
@@ -146,7 +166,6 @@ export async function resetSensorAndMachine(sensorId: string, creds: OperatorCre
     reason: `Reactivación operativa autorizada por ${creds.username}`
   });
 
-  // 1. Reiniciar ventana móvil en alert_detector
   await fetchWithFallback(
     `/api/detector/reset`,
     `http://${hostname}:8088/api/v1/detector/reset`,
@@ -157,26 +176,20 @@ export async function resetSensorAndMachine(sensorId: string, creds: OperatorCre
     }
   ).catch(() => {});
 
-  // 2. Reactivar máquina física en las réplicas de actuator_worker
+  // Enviar a ambas réplicas a través del proxy balanceado de Nginx
   await Promise.allSettled([
     fetch(`/api/actuators/${encodeURIComponent(sensorId)}/reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: payload
     }),
-    fetch(`http://${hostname}:8091/api/v1/actuators/${encodeURIComponent(sensorId)}/reset`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload
-    }),
-    fetch(`http://${hostname}:8092/api/v1/actuators/${encodeURIComponent(sensorId)}/reset`, {
+    fetch(`/api/actuators/${encodeURIComponent(sensorId)}/reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: payload
     })
   ]);
 
-  // 3. Normalizar estado materializado en plant_monitor_backend
   await fetchWithFallback(
     `/api/plant/${encodeURIComponent(sensorId)}/reset`,
     `http://${hostname}:8081/api/v1/sensors/${encodeURIComponent(sensorId)}/reset`,
@@ -196,12 +209,51 @@ export async function fetchAuditHistory(creds: OperatorCredentials): Promise<Aud
   );
 }
 
+export async function fetchNotificationConfig(creds: OperatorCredentials): Promise<NotificationConfigDto> {
+  return fetchWithFallback<NotificationConfigDto>(
+    `/api/dispatcher/api/v1/notifications/config`,
+    `http://${hostname}:8080/api/v1/notifications/config`,
+    {
+      headers: {
+        Authorization: buildBasicAuthHeader(creds)
+      }
+    }
+  );
+}
+
+export async function fetchNotificationHistory(creds: OperatorCredentials): Promise<NotificationRecordDto[]> {
+  return fetchWithFallback<NotificationRecordDto[]>(
+    `/api/dispatcher/api/v1/notifications/history`,
+    `http://${hostname}:8080/api/v1/notifications/history`,
+    {
+      headers: {
+        Authorization: buildBasicAuthHeader(creds)
+      }
+    }
+  );
+}
+
+export async function triggerTestNotification(
+  creds: OperatorCredentials,
+  message?: string
+): Promise<NotificationRecordDto> {
+  return fetchWithFallback<NotificationRecordDto>(
+    `/api/dispatcher/api/v1/notifications/test`,
+    `http://${hostname}:8080/api/v1/notifications/test`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: buildBasicAuthHeader(creds)
+      },
+      body: JSON.stringify(message ? { message } : {})
+    }
+  );
+}
+
 export async function fetchActuatorHistoryAllReplicas(): Promise<ActuatorStatusResponseDto[]> {
-  const urls = [
-    `/api/actuators/history`,
-    `http://${hostname}:8091/api/v1/actuators/history`,
-    `http://${hostname}:8092/api/v1/actuators/history`
-  ];
+  // Realiza 3 peticiones al upstream de Nginx (round-robin sobre las 2 réplicas en la red interna)
+  const urls = [`/api/actuators/history`, `/api/actuators/history`, `/api/actuators/history`];
 
   const results = await Promise.allSettled(
     urls.map(async (u) => {
@@ -228,11 +280,7 @@ export async function fetchActuatorHistoryAllReplicas(): Promise<ActuatorStatusR
 }
 
 export async function fetchMaintenanceTicketsAllReplicas(): Promise<MaintenanceTicketResponseDto[]> {
-  const urls = [
-    `/api/maintenance/tickets`,
-    `http://${hostname}:8093/api/v1/maintenance/tickets`,
-    `http://${hostname}:8094/api/v1/maintenance/tickets`
-  ];
+  const urls = [`/api/maintenance/tickets`, `/api/maintenance/tickets`, `/api/maintenance/tickets`];
 
   const results = await Promise.allSettled(
     urls.map(async (u) => {

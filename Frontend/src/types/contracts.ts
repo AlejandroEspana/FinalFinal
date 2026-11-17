@@ -73,6 +73,31 @@ export interface MaintenanceTicketResponseDto {
   completedAt: string;
 }
 
+export interface NotificationRecordDto {
+  notificationId: string;
+  channel: string;
+  recipient: string;
+  subject: string;
+  messageBody: string;
+  deliveryStatus: string;
+  whatsappDirectUrl: string;
+  pushTopicUrl: string;
+  sentAt: string;
+}
+
+export interface NotificationConfigDto {
+  email: string;
+  phone: string;
+  ntfyTopic: string;
+  ntfySubscribeUrl: string;
+  enabled: boolean;
+}
+
+export interface SimulationStateDto {
+  enabled: boolean;
+  rateMs: number;
+}
+
 export interface OperatorCredentials {
   username: string;
   password: string;
