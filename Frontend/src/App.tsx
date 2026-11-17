@@ -59,6 +59,7 @@ import {
   toggleSimulationState,
   triggerTestNotification
 } from './services/api';
+import { Building3DViewer } from './components/Building3DViewer';
 
 const DEFAULT_SENSORS: SensorPlantStatusDto[] = [
   'sensor_A',
@@ -83,31 +84,31 @@ const DEFAULT_SENSORS: SensorPlantStatusDto[] = [
 const ACTION_LABELS: Record<string, { label: string; badgeClass: string; btnClass: string }> = {
   APAGADO_INMEDIATO: {
     label: '🛑 APAGADO INMEDIATO (Corte Energía)',
-    badgeClass: 'bg-red-500/20 text-red-300 border-red-500/40',
-    btnClass: 'bg-red-600 hover:bg-red-500 text-white border-red-400/50 shadow-lg shadow-red-950/50'
+    badgeClass: 'bg-red-100 text-red-800 border-red-300',
+    btnClass: 'bg-red-700 hover:bg-red-600 text-white border-red-800 shadow-sm'
   },
   IGNORAR_10_MINUTOS: {
     label: '⏱️ IGNORAR 10 MINUTOS (Bajo Riesgo)',
-    badgeClass: 'bg-slate-700/40 text-slate-300 border-slate-600',
-    btnClass: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-600'
+    badgeClass: 'bg-[#EDE5D5] text-[#4A3F35] border-[#D5C7B0]',
+    btnClass: 'bg-[#E9DFCE] hover:bg-[#DFD2BC] text-[#2C2523] border-[#CBBBA0]'
   },
   PROGRAMAR_MANTENIMIENTO_AHORA: {
     label: '🔧 PROGRAMAR MANTENIMIENTO AHORA',
-    badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-    btnClass: 'bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold border-amber-400/50'
+    badgeClass: 'bg-amber-100 text-amber-900 border-amber-300',
+    btnClass: 'bg-amber-600 hover:bg-amber-500 text-white font-bold border-amber-700 shadow-sm'
   },
   RECONOCER_Y_ESPERAR_24H: {
     label: '⏳ RECONOCER Y ESPERAR 24H (x-delay 10s)',
-    badgeClass: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
-    btnClass: 'bg-purple-600 hover:bg-purple-500 text-white border-purple-400/50'
+    badgeClass: 'bg-purple-100 text-purple-900 border-purple-300',
+    btnClass: 'bg-[#7A542E] hover:bg-[#664524] text-white border-[#5E3F20] shadow-sm'
   }
 };
 
 const HARDENING_LAYERS = [
   {
-    layer: '1. Reverse Proxy & Dominio Propio',
-    tech: 'Nginx + TLS 1.2/1.3 + HSTS + Rate Limit',
-    detail: 'Dominio scada-ucc-alejandro.77.113.90.86.sslip.io. Todos los microservicios escuchan en 127.0.0.1 ocultando puertos internos.'
+    layer: '1. Reverse Proxy, TLS & DNS Resolver',
+    tech: 'Nginx + HTTPS 443 + Resolver 127.0.0.11',
+    detail: 'Dominio scada-ucc-alejandro.77.113.90.86.sslip.io con TLS 1.2/1.3, HSTS y ocultamiento total de puertos en 127.0.0.1.'
   },
   {
     layer: '2. Blindaje SSH & Cuentas',
@@ -121,7 +122,7 @@ const HARDENING_LAYERS = [
   },
   {
     layer: '4. Firewall Host & IPS Fail2ban',
-    tech: 'UFW / nftables + Fail2ban (sshd, nginx, recidive)',
+    tech: 'UFW / nftables + Fail2ban (sshd, recidive)',
     detail: 'Política deny incoming por defecto. Bloqueo automático incremental de IPs agresivas y escáneres.'
   },
   {
@@ -130,9 +131,9 @@ const HARDENING_LAYERS = [
     detail: 'ASLR completo (randomize_va_space=2), tcp_syncookies=1, rp_filter=1, kptr_restrict=2, dmesg_restrict=1.'
   },
   {
-    layer: '6. Auditoría Forense & Monitoreo',
-    tech: 'auditd + check-resources.sh + Lynis + sysstat',
-    detail: 'Reglas inmutables vigilando /etc/passwd, /etc/shadow, /etc/sudoers y cron de vigilancia de CPU/RAM/Disco cada 5m.'
+    layer: '6. Auditoría Forense & Backups SHA-256',
+    tech: 'auditd + backup-postgres-scada.sh + Lynis',
+    detail: 'Reglas inmutables en /etc/audit/rules.d/ y respaldos diarios automáticos de PostgreSQL con firma SHA-256.'
   }
 ];
 
@@ -314,7 +315,7 @@ export function App() {
           : 'Simulación automática Kafka PAUSADA (Modo Manual para Demostración)',
         detail: updated.enabled
           ? '97% lecturas normales, 2% advertencia, 1% crítico para evitar saturación de alertas.'
-          : 'Ahora solo se emitirán alertas cuando presiones los botones manuales en cada sensor.'
+          : 'Ahora solo se emitirán alertas cuando presiones los botones manuales en el Edificio 3D o tarjetas.'
       });
     } catch (err) {
       setFeedbackBanner({
@@ -400,8 +401,8 @@ export function App() {
 
       setFeedbackBanner({
         type: 'success',
-        title: `Decisión Auditada en PostgreSQL (#${result.auditRecordId}), Despachada a RabbitMQ y Notificada`,
-        detail: `Sensor: ${result.sensorId} | Acción: ${result.actionDispatched} | Notificado a ${notifConfig.phone} y ${notifConfig.email}`
+        title: `Decisión Auditada en PostgreSQL (#${result.auditRecordId}), Despachada a RabbitMQ y Notificada vía Amazon SNS`,
+        detail: `Sensor: ${result.sensorId} | Acción: ${result.actionDispatched} | Boletín ISO-10816 enviado a ${notifConfig.email}`
       });
 
       await refreshAllData();
@@ -422,8 +423,8 @@ export function App() {
       const rec = await triggerTestNotification(credentials);
       setFeedbackBanner({
         type: 'success',
-        title: `Alerta Multicanal Despachada (${rec.notificationId})`,
-        detail: `Enviada a ${rec.recipient} — Estado: ${rec.deliveryStatus}`
+        title: `Boletín Técnico Corporativo Despachado (${rec.notificationId})`,
+        detail: `Enviado vía Amazon SNS a ${rec.recipient} — Estado: ${rec.deliveryStatus}`
       });
       await refreshAllData();
     } catch (err) {
@@ -478,12 +479,12 @@ export function App() {
   const buildAlertWhatsAppUrl = (alert: HumanActionRequestDto) => {
     const cleanPhone = notifConfig.phone.replace(/[^0-9]/g, '') || '573154613867';
     const text =
-      `🚨 *ALERTA SCADA IoT INDUSTRIAL (UCC)*\n` +
-      `• *Alerta:* ${alert.alertId}\n` +
-      `• *Sensor:* ${alert.sensorId}\n` +
-      `• *Severidad:* ${alert.severity} (${Number(alert.triggerValue).toFixed(2)} mm/s)\n` +
-      `• *Detalle:* ${alert.description}\n` +
-      `• *Opciones:* ${alert.availableOptions.join(', ')}`;
+      `🚨 *BOLETÍN DE ALERTA SCADA IoT (ISO 10816-3)*\n` +
+      `• *Folio Alerta:* ${alert.alertId}\n` +
+      `• *Activo / Sensor:* ${alert.sensorId}\n` +
+      `• *Severidad:* ${alert.severity} (${Number(alert.triggerValue).toFixed(2)} mm/s RMS)\n` +
+      `• *Diagnóstico:* ${alert.description}\n` +
+      `• *Maniobras:* ${alert.availableOptions.join(' | ')}`;
     return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
   };
 
@@ -502,69 +503,68 @@ export function App() {
   const getSeverityStyles = (severity: AlertSeverity, operationalStatus: string) => {
     if (operationalStatus === 'EMERGENCY_HALTED') {
       return {
-        card: 'border-rose-500/80 bg-rose-950/30 shadow-lg shadow-rose-950/30',
-        badge: 'bg-rose-600 text-white',
-        bar: 'bg-rose-500',
+        card: 'border-rose-400 bg-rose-50/90 shadow-sm',
+        badge: 'bg-rose-700 text-white',
+        bar: 'bg-rose-600',
         label: 'DETENIDA (EMERGENCIA)'
       };
     }
     switch (severity) {
       case 'CRITICAL':
         return {
-          card: 'border-red-500/70 bg-red-950/20 shadow-lg shadow-red-950/20',
-          badge: 'bg-red-500/20 text-red-300 border border-red-500/40',
-          bar: 'bg-red-500',
+          card: 'border-red-400 bg-red-50/80 shadow-sm',
+          badge: 'bg-red-100 text-red-800 border border-red-300',
+          bar: 'bg-red-600',
           label: 'CRÍTICO (>90 mm/s)'
         };
       case 'WARNING':
         return {
-          card: 'border-amber-500/70 bg-amber-950/20 shadow-lg shadow-amber-950/20',
-          badge: 'bg-amber-500/20 text-amber-300 border border-amber-500/40',
-          bar: 'bg-amber-400',
+          card: 'border-amber-400 bg-amber-50/80 shadow-sm',
+          badge: 'bg-amber-100 text-amber-800 border border-amber-300',
+          bar: 'bg-amber-500',
           label: 'ADVERTENCIA (>75 x3)'
         };
       default:
         return {
-          card: 'border-slate-800 bg-slate-900/70 hover:border-slate-700',
-          badge: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
-          bar: 'bg-emerald-400',
+          card: 'border-[#E5DCCB] bg-[#FFFDF9] hover:border-[#CBBBA0]',
+          badge: 'bg-emerald-100 text-emerald-800 border border-emerald-300',
+          bar: 'bg-emerald-600',
           label: 'OPERACIÓN NORMAL'
         };
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md px-6 py-3.5">
+    <div className="min-h-screen bg-[#F7F2E9] text-[#2C2523] flex flex-col">
+      {/* Top Navbar en Tonos Crema y Bronce */}
+      <header className="sticky top-0 z-30 border-b border-[#E2D6C1] bg-[#FFFDF9]/95 backdrop-blur-md px-6 py-3.5 shadow-sm">
         <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-cyan-500/15 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+            <div className="h-10 w-10 rounded-xl bg-[#F4ECE0] border border-[#DFD2BC] flex items-center justify-center text-[#8C6239]">
               <Cpu className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold tracking-tight text-white">
-                  SCADA IoT Industrial — Mantenimiento Predictivo Interactivo
+                <h1 className="text-lg font-bold tracking-tight text-[#2C2523]">
+                  SCADA IoT Industrial & Gemelo Digital 3D — Mantenimiento Predictivo
                 </h1>
-                <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                  AWS EC2 + Hardening OS
+                <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 font-semibold">
+                  AWS EC2 + Amazon SNS + TLS
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Kafka (Stateful) • RabbitMQ (Fanout + Delayed x-delay) • PostgreSQL (ACID) • Alertas a {notifConfig.phone} y {notifConfig.email}
+              <p className="text-xs text-[#6E6256]">
+                Apache Kafka (Stateful) • RabbitMQ (Fanout + Delayed x-delay) • PostgreSQL (ACID) • Boletín ISO-10816 a {notifConfig.email}
               </p>
             </div>
           </div>
 
-          {/* Controles de Estado STOMP + Pausa Simulación + Sesión Auth */}
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={handleToggleSimulation}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
                 simState.enabled
-                  ? 'bg-cyan-950/50 border-cyan-500/40 text-cyan-300 hover:bg-cyan-900/50'
-                  : 'bg-amber-950/50 border-amber-500/40 text-amber-300 hover:bg-amber-900/50'
+                  ? 'bg-[#F4ECE0] border-[#D8C7AE] text-[#6B4A28] hover:bg-[#EAE0D0]'
+                  : 'bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200'
               }`}
               title="Pausa o reanuda la emisión aleatoria cada 12s en sensor_producer"
             >
@@ -573,10 +573,10 @@ export function App() {
             </button>
 
             <div
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono font-semibold ${
                 plantWs.connected
-                  ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-                  : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                  : 'bg-amber-50 border-amber-300 text-amber-800'
               }`}
             >
               <Radio className="w-3.5 h-3.5 animate-pulse" />
@@ -584,18 +584,18 @@ export function App() {
             </div>
 
             <div
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono ${
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono font-semibold ${
                 alertsWs.connected
-                  ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-                  : 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                  : 'bg-amber-50 border-amber-300 text-amber-800'
               }`}
             >
               <Radio className="w-3.5 h-3.5 animate-pulse" />
               <span>WS Alertas: {alertsWs.connected ? 'ONLINE' : 'SYNC'}</span>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs">
-              <ShieldCheck className="w-4 h-4 text-cyan-400" />
+            <div className="flex items-center gap-2 bg-[#F6EFE2] border border-[#DFD2BC] rounded-lg px-3 py-1.5 text-xs">
+              <ShieldCheck className="w-4 h-4 text-[#8C6239]" />
               <select
                 value={credentials.username}
                 onChange={(e) => {
@@ -605,7 +605,7 @@ export function App() {
                     password: user === 'admin' ? 'admin123' : 'operator123'
                   });
                 }}
-                className="bg-slate-800 text-cyan-300 font-mono rounded px-2 py-0.5 border border-slate-700 focus:outline-none"
+                className="bg-[#FFFDF9] text-[#2C2523] font-mono font-semibold rounded px-2 py-0.5 border border-[#D8C7AE] focus:outline-none"
               >
                 <option value="operator">operator (ROLE_OPERATOR)</option>
                 <option value="admin">admin (ROLE_ADMIN)</option>
@@ -614,7 +614,7 @@ export function App() {
 
             <button
               onClick={refreshAllData}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#FAF5EC] hover:bg-[#EFE6D5] text-[#4A3F35] text-xs font-medium border border-[#DFD2BC] transition"
             >
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
@@ -622,30 +622,30 @@ export function App() {
         </div>
       </header>
 
-      {/* Banner de Respuesta Real del Backend */}
+      {/* Banner de Respuesta Real */}
       {feedbackBanner && (
         <div className="max-w-[1600px] w-full mx-auto px-6 pt-4">
           <div
-            className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border text-sm ${
+            className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border text-sm shadow-sm ${
               feedbackBanner.type === 'success'
-                ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-200'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
                 : feedbackBanner.type === 'error'
-                ? 'bg-red-950/60 border-red-500/60 text-red-200'
-                : 'bg-cyan-950/50 border-cyan-500/50 text-cyan-200'
+                ? 'bg-red-50 border-red-300 text-red-950'
+                : 'bg-[#FFF9ED] border-[#E0CBA8] text-[#3D2E1E]'
             }`}
           >
             <div className="flex items-center gap-3">
-              {feedbackBanner.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />}
-              {feedbackBanner.type === 'error' && <XCircle className="w-5 h-5 text-red-400 shrink-0" />}
-              {feedbackBanner.type === 'info' && <Zap className="w-5 h-5 text-cyan-400 shrink-0" />}
+              {feedbackBanner.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />}
+              {feedbackBanner.type === 'error' && <XCircle className="w-5 h-5 text-red-700 shrink-0" />}
+              {feedbackBanner.type === 'info' && <Zap className="w-5 h-5 text-[#8C6239] shrink-0" />}
               <div>
-                <p className="font-semibold">{feedbackBanner.title}</p>
+                <p className="font-bold">{feedbackBanner.title}</p>
                 <p className="text-xs opacity-90 font-mono">{feedbackBanner.detail}</p>
               </div>
             </div>
             <button
               onClick={() => setFeedbackBanner(null)}
-              className="text-xs px-2.5 py-1 rounded bg-slate-900/60 hover:bg-slate-900 text-slate-300"
+              className="text-xs px-2.5 py-1 rounded bg-white/80 hover:bg-white text-[#4A3F35] border border-[#DFD2BC] font-semibold"
             >
               Cerrar
             </button>
@@ -655,61 +655,68 @@ export function App() {
 
       {/* Main Content Grid */}
       <main className="max-w-[1600px] w-full mx-auto px-6 py-6 flex-1 space-y-6">
-        {/* KPIs Superiores */}
+        {/* KPIs Superiores en Tarjetas Crema Claro */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-xl p-4 flex items-center justify-between shadow-sm">
             <div>
-              <p className="text-xs text-slate-400 uppercase">Sensores Normales</p>
-              <p className="text-2xl font-bold text-emerald-400 mt-1">{counts.normal} / 10</p>
+              <p className="text-xs text-[#6E6256] uppercase font-semibold">Sensores Normales</p>
+              <p className="text-2xl font-bold text-emerald-700 mt-1">{counts.normal} / 10</p>
             </div>
-            <Activity className="w-8 h-8 text-emerald-500/40" />
+            <Activity className="w-8 h-8 text-emerald-600/30" />
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-xl p-4 flex items-center justify-between shadow-sm">
             <div>
-              <p className="text-xs text-slate-400 uppercase">En Advertencia</p>
-              <p className="text-2xl font-bold text-amber-400 mt-1">{counts.warning}</p>
+              <p className="text-xs text-[#6E6256] uppercase font-semibold">En Advertencia</p>
+              <p className="text-2xl font-bold text-amber-600 mt-1">{counts.warning}</p>
             </div>
-            <AlertTriangle className="w-8 h-8 text-amber-500/40" />
+            <AlertTriangle className="w-8 h-8 text-amber-500/30" />
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-xl p-4 flex items-center justify-between shadow-sm">
             <div>
-              <p className="text-xs text-slate-400 uppercase">Críticos / Detenidos</p>
-              <p className="text-2xl font-bold text-red-400 mt-1">{counts.critical}</p>
+              <p className="text-xs text-[#6E6256] uppercase font-semibold">Críticos / Detenidos</p>
+              <p className="text-2xl font-bold text-red-700 mt-1">{counts.critical}</p>
             </div>
-            <AlertOctagon className="w-8 h-8 text-red-500/40" />
+            <AlertOctagon className="w-8 h-8 text-red-600/30" />
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-xl p-4 flex items-center justify-between shadow-sm">
             <div>
-              <p className="text-xs text-slate-400 uppercase">Alertas Activas</p>
-              <p className="text-2xl font-bold text-cyan-400 mt-1">{alerts.length}</p>
+              <p className="text-xs text-[#6E6256] uppercase font-semibold">Alertas Activas</p>
+              <p className="text-2xl font-bold text-[#8C6239] mt-1">{alerts.length}</p>
             </div>
-            <Flame className="w-8 h-8 text-cyan-500/40" />
+            <Flame className="w-8 h-8 text-[#8C6239]/30" />
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-xl p-4 flex items-center justify-between shadow-sm">
             <div>
-              <p className="text-xs text-slate-400 uppercase">Auditorías PostgreSQL</p>
-              <p className="text-2xl font-bold text-purple-400 mt-1">{auditLogs.length}</p>
+              <p className="text-xs text-[#6E6256] uppercase font-semibold">Auditorías PostgreSQL</p>
+              <p className="text-2xl font-bold text-[#5C4033] mt-1">{auditLogs.length}</p>
             </div>
-            <Database className="w-8 h-8 text-purple-500/40" />
+            <Database className="w-8 h-8 text-[#5C4033]/30" />
           </div>
         </div>
 
+        {/* NUEVO: Modelo 3D Interactivo del Edificio Industrial */}
+        <Building3DViewer
+          sensors={sensors}
+          onInjectSpike={handleInjectSpike}
+          onResetMachine={handleResetMachine}
+        />
+
         {/* Bloque Principal: Mapa de Sensores SCADA (Izquierda) + Consola de Decisiones del Operador (Derecha) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Columna Izquierda (7 cols): Mapa de Estado General de la Planta (10 Sensores) */}
-          <section className="lg:col-span-7 bg-slate-900/60 border border-slate-800 rounded-2xl p-5 flex flex-col">
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-slate-800">
+          {/* Columna Izquierda (7 cols): Tarjetas de Telemetría */}
+          <section className="lg:col-span-7 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 flex flex-col shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-[#EDE4D3]">
               <div>
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-cyan-400" />
-                  Mapa de Estado Materializado de la Planta (10 Sensores — Kafka Stateful)
+                <h2 className="text-base font-bold text-[#2C2523] flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-[#8C6239]" />
+                  Detalle de Sensores por Sector (10 Activos — Kafka Stateful)
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Ciclo realista de 12s (97% normal) para evitar saturación. Usa los botones de cada sensor para disparar alertas de prueba al instante.
+                <p className="text-xs text-[#6E6256] mt-0.5">
+                  Sincronizado en tiempo real con el modelo 3D superior. Ciclo realista de 12s (97% normal).
                 </p>
               </div>
             </div>
@@ -728,8 +735,8 @@ export function App() {
                     <div>
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-sm text-white">{sensor.sensorId}</span>
-                          <span className="text-[11px] font-mono text-slate-400">[{sensor.operationalStatus}]</span>
+                          <span className="font-mono font-bold text-sm text-[#2C2523]">{sensor.sensorId}</span>
+                          <span className="text-[11px] font-mono text-[#6E6256]">[{sensor.operationalStatus}]</span>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${style.badge}`}>
                           {style.label}
@@ -738,33 +745,33 @@ export function App() {
 
                       <div className="mt-3 flex items-baseline justify-between">
                         <div>
-                          <span className="text-2xl font-mono font-extrabold text-white">
+                          <span className="text-2xl font-mono font-extrabold text-[#2C2523]">
                             {sensor.lastVibration.toFixed(2)}
                           </span>
-                          <span className="text-xs text-slate-400 ml-1">mm/s RMS</span>
+                          <span className="text-xs text-[#6E6256] ml-1">mm/s RMS</span>
                         </div>
-                        <span className="text-[11px] text-slate-400 font-mono">
+                        <span className="text-[11px] text-[#6E6256] font-mono">
                           Umbral: 75 / 90 mm/s
                         </span>
                       </div>
 
-                      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mt-2">
+                      <div className="w-full h-2 bg-[#EAE0D0] rounded-full overflow-hidden mt-2">
                         <div
                           className={`h-full transition-all duration-300 ${style.bar}`}
                           style={{ width: `${pct}%` }}
                         />
                       </div>
 
-                      <p className="text-xs text-slate-300 mt-2.5 line-clamp-2 min-h-[2rem]">
+                      <p className="text-xs text-[#4A3F35] mt-2.5 line-clamp-2 min-h-[2rem]">
                         {sensor.statusDescription}
                       </p>
                     </div>
 
-                    <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5">
+                    <div className="mt-3 pt-2.5 border-t border-[#EDE4D3] flex flex-wrap items-center gap-1.5">
                       <button
                         onClick={() => handleInjectSpike(sensor.sensorId, 96.4, 1)}
                         disabled={isHalted}
-                        className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 disabled:opacity-40 transition"
+                        className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded bg-red-100 hover:bg-red-200 text-red-900 border border-red-300 disabled:opacity-40 transition"
                       >
                         ⚡ Pico &gt;90
                       </button>
@@ -772,7 +779,7 @@ export function App() {
                       <button
                         onClick={() => handleInjectSpike(sensor.sensorId, 82.0, 3)}
                         disabled={isHalted}
-                        className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 disabled:opacity-40 transition"
+                        className="flex-1 text-[11px] font-semibold px-2 py-1.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 disabled:opacity-40 transition"
                       >
                         ⚠️ Ráfaga 3x &gt;75
                       </button>
@@ -780,7 +787,7 @@ export function App() {
                       {(isHalted || sensor.severity !== 'NORMAL') && (
                         <button
                           onClick={() => handleResetMachine(sensor.sensorId)}
-                          className="text-[11px] font-semibold px-2.5 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 transition"
+                          className="text-[11px] font-semibold px-2.5 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white flex items-center gap-1 transition"
                         >
                           <RotateCcw className="w-3 h-3" />
                           Reactivar
@@ -794,18 +801,18 @@ export function App() {
           </section>
 
           {/* Columna Derecha (5 cols): Consola Interactiva de Decisiones del Operador */}
-          <section className="lg:col-span-5 bg-slate-900/60 border border-slate-800 rounded-2xl p-5 flex flex-col">
-            <div className="pb-4 border-b border-slate-800 flex items-center justify-between">
+          <section className="lg:col-span-5 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 flex flex-col shadow-sm">
+            <div className="pb-4 border-b border-[#EDE4D3] flex items-center justify-between">
               <div>
-                <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <AlertOctagon className="w-5 h-5 text-amber-400" />
+                <h2 className="text-base font-bold text-[#2C2523] flex items-center gap-2">
+                  <AlertOctagon className="w-5 h-5 text-amber-600" />
                   Consola Interactiva del Operador (RabbitMQ Fanout)
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Opciones dinámicas desde <code className="text-amber-300">alert_router</code> con notificación automática a móvil y correo.
+                <p className="text-xs text-[#6E6256] mt-0.5">
+                  Opciones dinámicas desde <code className="text-[#8C6239] font-semibold">alert_router</code> con despacho de boletín ISO-10816 vía Amazon SNS.
                 </p>
               </div>
-              <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-slate-800 text-cyan-300 border border-slate-700">
+              <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-[#F4ECE0] text-[#7A542E] border border-[#DFD2BC]">
                 {alerts.length} activas
               </span>
             </div>
@@ -817,18 +824,18 @@ export function App() {
                   return (
                     <div
                       key={item.alertId}
-                      className="rounded-xl bg-purple-950/40 border border-purple-500/40 p-3 text-xs"
+                      className="rounded-xl bg-[#F8F1E5] border border-[#D8C3A5] p-3 text-xs"
                     >
-                      <div className="flex items-center justify-between text-purple-200 font-mono">
+                      <div className="flex items-center justify-between text-[#5C4033] font-mono">
                         <span className="flex items-center gap-1.5 font-semibold">
-                          <Clock className="w-4 h-4 text-purple-400 animate-spin" />
+                          <Clock className="w-4 h-4 text-[#8C6239] animate-spin" />
                           RabbitMQ Delayed Exchange (x-delay) — {item.sensorId}
                         </span>
                         <span>{(item.remainingMs / 1000).toFixed(1)}s restantes</span>
                       </div>
-                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-2">
+                      <div className="w-full h-1.5 bg-[#E5DCCB] rounded-full overflow-hidden mt-2">
                         <div
-                          className="h-full bg-purple-400 transition-all duration-200"
+                          className="h-full bg-[#8C6239] transition-all duration-200"
                           style={{ width: `${pct}%` }}
                         />
                       </div>
@@ -840,11 +847,11 @@ export function App() {
 
             <div className="mt-4 space-y-3.5 max-h-[620px] overflow-y-auto pr-1 flex-1">
               {alerts.length === 0 ? (
-                <div className="h-64 flex flex-col items-center justify-center text-center border border-dashed border-slate-800 rounded-xl p-6 text-slate-400">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500/60 mb-2" />
-                  <p className="text-sm font-medium text-slate-300">Sin alertas pendientes de decisión humana</p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Haz clic en &ldquo;⚡ Pico &gt;90&rdquo; o &ldquo;⚠️ Ráfaga 3x &gt;75&rdquo; en cualquier sensor para disparar el flujo completo.
+                <div className="h-64 flex flex-col items-center justify-center text-center border border-dashed border-[#DFD2BC] bg-[#FAF6EE] rounded-xl p-6 text-[#6E6256]">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-600/70 mb-2" />
+                  <p className="text-sm font-bold text-[#2C2523]">Sin alertas pendientes de decisión humana</p>
+                  <p className="text-xs text-[#6E6256] mt-1">
+                    Selecciona un sensor en el Edificio 3D o en las tarjetas y haz clic en &ldquo;⚡ Pico &gt;90&rdquo; para disparar una alerta real.
                   </p>
                 </div>
               ) : (
@@ -857,8 +864,8 @@ export function App() {
                       key={alert.alertId}
                       className={`rounded-xl border p-4 transition ${
                         isCritical
-                          ? 'bg-red-950/25 border-red-500/50'
-                          : 'bg-amber-950/25 border-amber-500/50'
+                          ? 'bg-red-50/90 border-red-300'
+                          : 'bg-amber-50/90 border-amber-300'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -866,26 +873,26 @@ export function App() {
                           <div className="flex items-center gap-2">
                             <span
                               className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                                isCritical ? 'bg-red-500 text-white' : 'bg-amber-400 text-slate-950'
+                                isCritical ? 'bg-red-700 text-white' : 'bg-amber-600 text-white'
                               }`}
                             >
                               {alert.severity}
                             </span>
-                            <span className="font-mono font-bold text-sm text-white">
+                            <span className="font-mono font-bold text-sm text-[#2C2523]">
                               {alert.sensorId}
                             </span>
-                            <span className="font-mono text-xs text-slate-400">
+                            <span className="font-mono text-xs text-[#6E6256]">
                               ({alert.alertId})
                             </span>
                           </div>
-                          <p className="text-xs text-slate-200 mt-1.5">{alert.description}</p>
+                          <p className="text-xs text-[#3D342E] mt-1.5 font-medium">{alert.description}</p>
                         </div>
 
                         <div className="text-right shrink-0">
-                          <span className="text-sm font-mono font-bold text-white">
+                          <span className="text-sm font-mono font-bold text-[#2C2523]">
                             {Number(alert.triggerValue).toFixed(2)} mm/s
                           </span>
-                          <p className="text-[10px] text-slate-400 font-mono">
+                          <p className="text-[10px] text-[#6E6256] font-mono">
                             {new Date(alert.timestamp).toLocaleTimeString()}
                           </p>
                         </div>
@@ -901,8 +908,8 @@ export function App() {
                               [alert.alertId]: e.target.value
                             }))
                           }
-                          placeholder="Nota de auditoría opcional para PostgreSQL..."
-                          className="w-full text-xs bg-slate-950/80 border border-slate-700/80 rounded-lg px-3 py-1.5 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-cyan-500"
+                          placeholder="Observación técnica para el acta de auditoría PostgreSQL y correo SNS..."
+                          className="w-full text-xs bg-[#FFFDF9] border border-[#D8C7AE] rounded-lg px-3 py-1.5 text-[#2C2523] placeholder:text-[#8C7E6D] focus:outline-none focus:border-[#8C6239]"
                         />
                       </div>
 
@@ -910,8 +917,8 @@ export function App() {
                         {alert.availableOptions.map((option) => {
                           const meta = ACTION_LABELS[option] ?? {
                             label: option,
-                            badgeClass: 'bg-slate-800 text-slate-200',
-                            btnClass: 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                            badgeClass: 'bg-[#EDE5D5] text-[#2C2523]',
+                            btnClass: 'bg-[#8C6239] hover:bg-[#7A542E] text-white'
                           };
                           return (
                             <button
@@ -921,7 +928,7 @@ export function App() {
                               className={`w-full py-2 px-3 rounded-lg text-xs font-semibold border transition flex items-center justify-between ${meta.btnClass} disabled:opacity-50`}
                             >
                               <span>{meta.label}</span>
-                              <span className="font-mono text-[10px] opacity-80">{option}</span>
+                              <span className="font-mono text-[10px] opacity-85">{option}</span>
                             </button>
                           );
                         })}
@@ -931,7 +938,7 @@ export function App() {
                             href={buildAlertWhatsAppUrl(alert)}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400 hover:text-emerald-300"
+                            className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 hover:text-emerald-700"
                           >
                             <MessageSquare className="w-3.5 h-3.5" />
                             Enviar a WhatsApp ({notifConfig.phone})
@@ -939,7 +946,7 @@ export function App() {
 
                           <button
                             onClick={() => handleDismissOnly(alert.alertId)}
-                            className="text-[11px] text-slate-400 hover:text-slate-200"
+                            className="text-[11px] text-[#6E6256] hover:text-[#2C2523] font-medium"
                           >
                             Descartar de la vista
                           </button>
@@ -953,20 +960,19 @@ export function App() {
           </section>
         </div>
 
-        {/* NUEVA SECCIÓN PLUS: Centro de Notificaciones Multicanal (Móvil / WhatsApp / Email) + Hardening Ubuntu Server */}
+        {/* SECCIÓN PLUS: Centro de Notificaciones Multicanal (Amazon SNS / WhatsApp / Push) + Hardening Ubuntu Server */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Panel Notificaciones (6 cols) */}
-          <section className="lg:col-span-6 bg-slate-900/60 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+          <section className="lg:col-span-6 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 flex flex-col justify-between shadow-sm">
             <div>
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#EDE4D3]">
                 <div className="flex items-center gap-2">
-                  <Bell className="w-5 h-5 text-emerald-400" />
+                  <Bell className="w-5 h-5 text-[#8C6239]" />
                   <div>
-                    <h3 className="text-sm font-bold text-white">
-                      Centro de Alertas Multicanal (Móvil / WhatsApp / Correo Institucional)
+                    <h3 className="text-sm font-bold text-[#2C2523]">
+                      Centro de Boletines Corporativos (Amazon SNS + Móvil + WhatsApp)
                     </h3>
-                    <p className="text-xs text-slate-400">
-                      Despacho automático en alertas críticas (cooldown 60s) y resoluciones del operador.
+                    <p className="text-xs text-[#6E6256]">
+                      Formato industrial ISO 10816-3 enviado vía AWS SNS y Push móvil.
                     </p>
                   </div>
                 </div>
@@ -974,32 +980,32 @@ export function App() {
                 <button
                   onClick={handleSendTestNotification}
                   disabled={sendingTestNotif}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#8C6239] hover:bg-[#734F2C] text-white text-xs font-semibold transition disabled:opacity-50 shadow-sm"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  {sendingTestNotif ? 'Enviando...' : 'Probar Alerta en Vivo'}
+                  {sendingTestNotif ? 'Enviando...' : 'Emitir Boletín de Prueba'}
                 </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
-                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
-                  <div className="flex items-center gap-1.5 text-cyan-400 font-semibold">
+                <div className="bg-[#FAF6EE] border border-[#E5DCCB] rounded-xl p-3 text-xs">
+                  <div className="flex items-center gap-1.5 text-[#8C6239] font-bold">
                     <Mail className="w-4 h-4" />
-                    <span>Correo Institucional</span>
+                    <span>Amazon SNS Email</span>
                   </div>
-                  <p className="font-mono text-slate-200 mt-1 break-all">{notifConfig.email}</p>
+                  <p className="font-mono text-[#2C2523] mt-1 break-all">{notifConfig.email}</p>
                 </div>
 
-                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
-                  <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                <div className="bg-[#FAF6EE] border border-[#E5DCCB] rounded-xl p-3 text-xs">
+                  <div className="flex items-center gap-1.5 text-emerald-800 font-bold">
                     <Smartphone className="w-4 h-4" />
-                    <span>Móvil / WhatsApp</span>
+                    <span>SMS / WhatsApp</span>
                   </div>
-                  <p className="font-mono text-slate-200 mt-1">{notifConfig.phone}</p>
+                  <p className="font-mono text-[#2C2523] mt-1">{notifConfig.phone}</p>
                 </div>
 
-                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
-                  <div className="flex items-center justify-between text-purple-400 font-semibold">
+                <div className="bg-[#FAF6EE] border border-[#E5DCCB] rounded-xl p-3 text-xs">
+                  <div className="flex items-center justify-between text-[#5C4033] font-bold">
                     <span>Push Móvil (ntfy.sh)</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </div>
@@ -1007,7 +1013,7 @@ export function App() {
                     href={notifConfig.ntfySubscribeUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-mono text-purple-300 hover:underline mt-1 block truncate"
+                    className="font-mono text-[#8C6239] hover:underline mt-1 block truncate font-semibold"
                   >
                     {notifConfig.ntfyTopic}
                   </a>
@@ -1016,34 +1022,34 @@ export function App() {
 
               <div className="mt-4 max-h-48 overflow-y-auto space-y-2">
                 {notifHistory.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-6 text-center">
-                    Haz clic en &ldquo;Probar Alerta en Vivo&rdquo; o resuelve una alerta para ver el historial de despacho.
+                  <p className="text-xs text-[#6E6256] py-6 text-center">
+                    Haz clic en &ldquo;Emitir Boletín de Prueba&rdquo; o resuelve una alerta para ver el historial de envíos.
                   </p>
                 ) : (
                   notifHistory.map((n) => (
                     <div
                       key={n.notificationId}
-                      className="rounded-lg bg-slate-950/80 border border-slate-800 p-2.5 text-xs flex items-center justify-between gap-3"
+                      className="rounded-lg bg-[#FAF6EE] border border-[#E5DCCB] p-2.5 text-xs flex items-center justify-between gap-3"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-emerald-400">{n.notificationId}</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300">
+                          <span className="font-mono font-bold text-[#8C6239]">{n.notificationId}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 font-semibold">
                             {n.deliveryStatus}
                           </span>
                         </div>
-                        <p className="text-slate-200 font-medium truncate mt-0.5">{n.subject}</p>
+                        <p className="text-[#2C2523] font-medium truncate mt-0.5">{n.subject}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <a
                           href={n.whatsappDirectUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="px-2 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-semibold text-[11px]"
+                          className="px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white font-semibold text-[11px]"
                         >
                           WhatsApp
                         </a>
-                        <span className="font-mono text-[10px] text-slate-400">
+                        <span className="font-mono text-[10px] text-[#6E6256]">
                           {new Date(n.sentAt).toLocaleTimeString()}
                         </span>
                       </div>
@@ -1054,21 +1060,21 @@ export function App() {
             </div>
           </section>
 
-          {/* Panel Hardening Ubuntu Server 24.04 LTS en AWS EC2 (6 cols) */}
-          <section className="lg:col-span-6 bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+          {/* Panel Hardening Ubuntu Server 24.04 LTS en AWS EC2 */}
+          <section className="lg:col-span-6 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between pb-3 border-b border-[#EDE4D3]">
               <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-cyan-400" />
+                <Shield className="w-5 h-5 text-[#8C6239]" />
                 <div>
-                  <h3 className="text-sm font-bold text-white">
+                  <h3 className="text-sm font-bold text-[#2C2523]">
                     Hardening de Ubuntu Server 24.04 LTS en AWS EC2 (Defensa en Profundidad)
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-[#6E6256]">
                     Capas de seguridad de Sistemas Operativos activas en el servidor de producción
                   </p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                 <Lock className="w-3 h-3" /> 6 Capas Activas
               </span>
             </div>
@@ -1077,14 +1083,14 @@ export function App() {
               {HARDENING_LAYERS.map((item) => (
                 <div
                   key={item.layer}
-                  className="rounded-xl bg-slate-950/70 border border-slate-800/90 p-3 text-xs"
+                  className="rounded-xl bg-[#FAF6EE] border border-[#E5DCCB] p-3 text-xs"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-cyan-300">{item.layer}</span>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="font-bold text-[#2C2523]">{item.layer}</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
                   </div>
-                  <p className="font-mono text-[10px] text-purple-300 mt-0.5">{item.tech}</p>
-                  <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">{item.detail}</p>
+                  <p className="font-mono text-[10px] text-[#8C6239] font-semibold mt-0.5">{item.tech}</p>
+                  <p className="text-[#5C5146] text-[11px] mt-1 leading-relaxed">{item.detail}</p>
                 </div>
               ))}
             </div>
@@ -1093,44 +1099,44 @@ export function App() {
 
         {/* Sección Inferior 1: Ejecución en Workers Concurrentes */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+          <section className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between pb-3 border-b border-[#EDE4D3]">
               <div className="flex items-center gap-2">
-                <Power className="w-5 h-5 text-red-400" />
+                <Power className="w-5 h-5 text-red-700" />
                 <div>
-                  <h3 className="text-sm font-bold text-white">
+                  <h3 className="text-sm font-bold text-[#2C2523]">
                     Actuator Workers — Paradas de Emergencia y Reactivaciones (2 Réplicas)
                   </h3>
-                  <p className="text-xs text-slate-400">
-                    Cola RabbitMQ: <code className="text-red-300">critical_actions_queue</code> (127.0.0.1:8091-8092)
+                  <p className="text-xs text-[#6E6256]">
+                    Cola RabbitMQ: <code className="text-red-800 font-semibold">critical_actions_queue</code> (127.0.0.1:8091-8092)
                   </p>
                 </div>
               </div>
-              <span className="text-xs font-mono text-slate-400">{actuatorLogs.length} eventos</span>
+              <span className="text-xs font-mono text-[#6E6256]">{actuatorLogs.length} eventos</span>
             </div>
 
             <div className="mt-3 max-h-60 overflow-y-auto space-y-2">
               {actuatorLogs.length === 0 ? (
-                <p className="text-xs text-slate-500 py-8 text-center">
+                <p className="text-xs text-[#6E6256] py-8 text-center">
                   Aún no se han ejecutado comandos de corte de energía en actuator_worker.
                 </p>
               ) : (
                 actuatorLogs.map((log) => (
                   <div
                     key={log.commandId}
-                    className="rounded-lg bg-slate-950/70 border border-slate-800 p-3 text-xs flex items-center justify-between gap-3"
+                    className="rounded-lg bg-[#FAF6EE] border border-[#E5DCCB] p-3 text-xs flex items-center justify-between gap-3"
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-white">{log.sensorId}</span>
-                        <span className="font-mono text-[11px] text-slate-400">{log.commandId}</span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">
+                        <span className="font-mono font-bold text-[#2C2523]">{log.sensorId}</span>
+                        <span className="font-mono text-[11px] text-[#6E6256]">{log.commandId}</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-red-100 text-red-800 border border-red-300 font-semibold">
                           {log.previousState} → {log.currentState}
                         </span>
                       </div>
-                      <p className="text-slate-300 mt-1">{log.reason}</p>
+                      <p className="text-[#4A3F35] mt-1">{log.reason}</p>
                     </div>
-                    <div className="text-right font-mono text-[11px] text-slate-400 shrink-0">
+                    <div className="text-right font-mono text-[11px] text-[#6E6256] shrink-0">
                       <div>Op: {log.operatorId}</div>
                       <div>{new Date(log.executedAt).toLocaleTimeString()}</div>
                     </div>
@@ -1140,50 +1146,50 @@ export function App() {
             </div>
           </section>
 
-          <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+          <section className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between pb-3 border-b border-[#EDE4D3]">
               <div className="flex items-center gap-2">
-                <Wrench className="w-5 h-5 text-amber-400" />
+                <Wrench className="w-5 h-5 text-amber-700" />
                 <div>
-                  <h3 className="text-sm font-bold text-white">
+                  <h3 className="text-sm font-bold text-[#2C2523]">
                     Maintenance Workers — Órdenes Inmediatas y Diferidas x-delay (2 Réplicas)
                   </h3>
-                  <p className="text-xs text-slate-400">
-                    Cola RabbitMQ: <code className="text-amber-300">maintenance_queue</code> + <code className="text-purple-300">delayed_actions_exchange</code> (127.0.0.1:8093-8094)
+                  <p className="text-xs text-[#6E6256]">
+                    Cola RabbitMQ: <code className="text-amber-800 font-semibold">maintenance_queue</code> + <code className="text-[#8C6239] font-semibold">delayed_actions_exchange</code> (127.0.0.1:8093-8094)
                   </p>
                 </div>
               </div>
-              <span className="text-xs font-mono text-slate-400">{maintenanceTickets.length} órdenes</span>
+              <span className="text-xs font-mono text-[#6E6256]">{maintenanceTickets.length} órdenes</span>
             </div>
 
             <div className="mt-3 max-h-60 overflow-y-auto space-y-2">
               {maintenanceTickets.length === 0 ? (
-                <p className="text-xs text-slate-500 py-8 text-center">
+                <p className="text-xs text-[#6E6256] py-8 text-center">
                   Aún no se han recibido órdenes de trabajo en maintenance_worker.
                 </p>
               ) : (
                 maintenanceTickets.map((ticket) => (
                   <div
                     key={ticket.workOrderId}
-                    className="rounded-lg bg-slate-950/70 border border-slate-800 p-3 text-xs flex items-center justify-between gap-3"
+                    className="rounded-lg bg-[#FAF6EE] border border-[#E5DCCB] p-3 text-xs flex items-center justify-between gap-3"
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-white">{ticket.sensorId}</span>
-                        <span className="font-mono text-[11px] text-slate-400">{ticket.workOrderId}</span>
+                        <span className="font-mono font-bold text-[#2C2523]">{ticket.sensorId}</span>
+                        <span className="font-mono text-[11px] text-[#6E6256]">{ticket.workOrderId}</span>
                         <span
-                          className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold ${
                             ticket.delayed
-                              ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                              : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                              ? 'bg-purple-100 text-purple-900 border-purple-300'
+                              : 'bg-amber-100 text-amber-900 border-amber-300'
                           }`}
                         >
                           {ticket.delayed ? `DIFERIDA (x-delay ${ticket.delayMillis}ms)` : 'INMEDIATA'}
                         </span>
                       </div>
-                      <p className="text-slate-300 mt-1">{ticket.executionSummary}</p>
+                      <p className="text-[#4A3F35] mt-1">{ticket.executionSummary}</p>
                     </div>
-                    <div className="text-right font-mono text-[11px] text-slate-400 shrink-0">
+                    <div className="text-right font-mono text-[11px] text-[#6E6256] shrink-0">
                       <div>Op: {ticket.operatorId}</div>
                       <div>{new Date(ticket.completedAt).toLocaleTimeString()}</div>
                     </div>
@@ -1195,27 +1201,27 @@ export function App() {
         </div>
 
         {/* Sección Inferior 2: Tabla de Auditoría Transaccional en PostgreSQL */}
-        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
-          <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <section className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#EDE4D3]">
             <div className="flex items-center gap-2.5">
-              <Database className="w-5 h-5 text-purple-400" />
+              <Database className="w-5 h-5 text-[#8C6239]" />
               <div>
-                <h2 className="text-base font-bold text-white">
-                  Registro Histórico de Auditoría Transaccional en PostgreSQL (<code className="text-purple-300">operator_decision_audit</code>)
+                <h2 className="text-base font-bold text-[#2C2523]">
+                  Registro Histórico de Auditoría Transaccional en PostgreSQL (<code className="text-[#8C6239]">operator_decision_audit</code>)
                 </h2>
-                <p className="text-xs text-slate-400">
-                  Persistencia ACID verificada antes del despacho a RabbitMQ • Autenticado como <code className="text-cyan-300">{credentials.username}</code>.
+                <p className="text-xs text-[#6E6256]">
+                  Persistencia ACID verificada antes del despacho a RabbitMQ • Respaldo diario cifrado en <code className="text-[#8C6239]">/var/backups/scada-postgres</code>.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 text-xs">
               <div className="flex items-center gap-2">
-                <span className="text-slate-400">Sensor:</span>
+                <span className="text-[#6E6256] font-medium">Sensor:</span>
                 <select
                   value={sensorFilter}
                   onChange={(e) => setSensorFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 font-mono"
+                  className="bg-[#FAF6EE] border border-[#D8C7AE] rounded-lg px-2.5 py-1 text-[#2C2523] font-mono font-semibold"
                 >
                   <option value="ALL">TODOS ({auditLogs.length})</option>
                   {sensors.map((s) => (
@@ -1229,7 +1235,7 @@ export function App() {
               <button
                 onClick={handleExportAuditCsv}
                 disabled={auditLogs.length === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/40 font-semibold transition disabled:opacity-40"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F4ECE0] hover:bg-[#E9DFCE] text-[#6B4A28] border border-[#D8C7AE] font-semibold transition disabled:opacity-40"
               >
                 <Download className="w-3.5 h-3.5" />
                 Exportar Acta CSV
@@ -1240,7 +1246,7 @@ export function App() {
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="border-b border-slate-800 text-slate-400 font-mono uppercase text-[11px]">
+                <tr className="border-b border-[#E5DCCB] bg-[#FAF6EE] text-[#5C5146] font-mono uppercase text-[11px]">
                   <th className="py-2.5 px-3">ID</th>
                   <th className="py-2.5 px-3">Alerta</th>
                   <th className="py-2.5 px-3">Sensor</th>
@@ -1252,34 +1258,34 @@ export function App() {
                   <th className="py-2.5 px-3">Fecha / Hora</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y divide-[#EDE4D3]">
                 {filteredAudits.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-500">
+                    <td colSpan={9} className="py-8 text-center text-[#6E6256]">
                       No hay registros de auditoría en PostgreSQL para el filtro seleccionado.
                     </td>
                   </tr>
                 ) : (
                   filteredAudits.map((row) => (
-                    <tr key={row.id} className="hover:bg-slate-900/90 transition">
-                      <td className="py-2.5 px-3 font-mono font-bold text-purple-300">#{row.id}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-300">{row.alertId}</td>
-                      <td className="py-2.5 px-3 font-mono font-bold text-white">{row.sensorId}</td>
+                    <tr key={row.id} className="hover:bg-[#FAF6EE] transition">
+                      <td className="py-2.5 px-3 font-mono font-bold text-[#8C6239]">#{row.id}</td>
+                      <td className="py-2.5 px-3 font-mono text-[#4A3F35]">{row.alertId}</td>
+                      <td className="py-2.5 px-3 font-mono font-bold text-[#2C2523]">{row.sensorId}</td>
                       <td className="py-2.5 px-3">
                         <span
-                          className={`font-mono text-[11px] px-2 py-0.5 rounded border ${
+                          className={`font-mono text-[11px] px-2 py-0.5 rounded border font-semibold ${
                             ACTION_LABELS[row.chosenAction]?.badgeClass ??
-                            'bg-slate-800 text-slate-200 border-slate-700'
+                            'bg-[#EDE5D5] text-[#2C2523] border-[#D5C7B0]'
                           }`}
                         >
                           {row.chosenAction}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3 font-mono text-cyan-300">{row.operatorId}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-300">{row.routingTarget}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-300">{row.delayMillis} ms</td>
-                      <td className="py-2.5 px-3 text-slate-300 max-w-xs truncate">{row.notes}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-400">
+                      <td className="py-2.5 px-3 font-mono font-semibold text-[#6B4A28]">{row.operatorId}</td>
+                      <td className="py-2.5 px-3 font-mono text-[#4A3F35]">{row.routingTarget}</td>
+                      <td className="py-2.5 px-3 font-mono text-[#4A3F35]">{row.delayMillis} ms</td>
+                      <td className="py-2.5 px-3 text-[#4A3F35] max-w-xs truncate">{row.notes}</td>
+                      <td className="py-2.5 px-3 font-mono text-[#6E6256]">
                         {new Date(row.recordedAt).toLocaleString()}
                       </td>
                     </tr>

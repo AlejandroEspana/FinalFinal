@@ -347,6 +347,7 @@ services:
       - action_dispatcher
     ports:
       - "80:80"
+      - "443:443"
       - "3000:80"
     deploy:
       resources:

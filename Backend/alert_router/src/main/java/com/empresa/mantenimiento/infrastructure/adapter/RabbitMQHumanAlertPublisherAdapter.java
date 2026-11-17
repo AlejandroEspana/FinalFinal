@@ -17,20 +17,38 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Adaptador RabbitMQ que publica en el Fanout Exchange 'human_alerts' y dispara alerta a Amazon SNS
- * y Push móvil con control de tasa (cooldown de 60s) para no saturar al operador.
+ * Adaptador RabbitMQ que publica en el Fanout Exchange 'human_alerts' y emite boletín técnico
+ * formal a Amazon SNS + Push móvil con control de tasa (cooldown de 60s).
  */
 @Component
 public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPort {
 
     private static final Logger log = LoggerFactory.getLogger(RabbitMQHumanAlertPublisherAdapter.class);
     private static final long NOTIFICATION_COOLDOWN_MS = 60_000L;
+    private static final DateTimeFormatter COLOMBIA_TIME_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'COT'").withZone(ZoneId.of("America/Bogota"));
+
+    private static final Map<String, String> SENSOR_BUILDING_LOCATION = Map.of(
+            "sensor_A", "Nivel 1 (Sótano de Potencia) — Turbina Principal A1",
+            "sensor_B", "Nivel 1 (Sótano de Potencia) — Generador Síncrono B2",
+            "sensor_C", "Nivel 1 (Sótano de Potencia) — Bomba Hidráulica C3",
+            "sensor_D", "Nivel 1 (Sótano de Potencia) — Reductor Mecánico D4",
+            "sensor_E", "Nivel 2 (Planta de Procesos) — Compresor Centrífugo E1",
+            "sensor_F", "Nivel 2 (Planta de Procesos) — Extrusora Industrial F2",
+            "sensor_G", "Nivel 2 (Planta de Procesos) — Ventilador de Tiro Inducido G3",
+            "sensor_H", "Nivel 3 (Cubierta Técnica & HVAC) — Chiller de Enfriamiento H1",
+            "sensor_I", "Nivel 3 (Cubierta Técnica & HVAC) — Torre de Refrigeración I2",
+            "sensor_J", "Nivel 3 (Cubierta Técnica & HVAC) — Subestación Eléctrica J3"
+    );
 
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
@@ -71,19 +89,42 @@ public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPo
     }
 
     private void sendCriticalAlertToSnsAndPush(HumanActionRequest request) {
-        String subject = "ALERTA CRITICA SCADA IoT: " + request.sensorId().value() + " (" + request.alertId().value() + ")";
+        String sensorId = request.sensorId().value();
+        String location = SENSOR_BUILDING_LOCATION.getOrDefault(sensorId, "Edificio Industrial — Sector " + sensorId);
+        String formattedDate = COLOMBIA_TIME_FMT.format(Instant.now());
+
+        String subject = String.format("[ALERTA CRÍTICA ISO-10816] %s (%.2f mm/s) — Acción Requerida",
+                sensorId, request.triggerValue());
+
         String msg = String.format(
-                "🚨 ALERTA CRÍTICA DETECTADA EN PLANTA INDUSTRIAL (UCC)\n" +
-                "• ID Alerta: %s\n" +
-                "• Sensor: %s (%.2f mm/s RMS)\n" +
-                "• Detalle: %s\n" +
-                "• Opciones: %s\n" +
-                "• Consola SCADA AWS: http://scada-ucc-alejandro.77.113.90.86.sslip.io:3000",
+                "======================================================================\n" +
+                "ALERTA TEMPRANA DE ANOMALÍA MECÁNICA — CENTRO DE MONITOREO SCADA IoT\n" +
+                "CLASIFICACIÓN DE SEVERIDAD: ZONA D (PELIGRO DE DAÑO ESTRUCTURAL)\n" +
+                "======================================================================\n\n" +
+                "ATENCIÓN INGENIERO DE TURNO:\n\n" +
+                "El motor analítico Stateful (Apache Kafka) ha detectado una violación\n" +
+                "del umbral crítico de vibración RMS (> 90.0 mm/s) que requiere una\n" +
+                "decisión humana inmediata en la consola interactiva:\n\n" +
+                "1. DIAGNÓSTICO DEL ACTIVO AFECTADO\n" +
+                "   • ID de Alerta             : %s\n" +
+                "   • Sensor / Máquina         : %s\n" +
+                "   • Ubicación en Edificio 3D : %s\n" +
+                "   • Lectura RMS Registrada   : %.2f mm/s (Umbral máximo: 90.0 mm/s)\n" +
+                "   • Diagnóstico Automático   : %s\n" +
+                "   • Marca Temporal           : %s\n\n" +
+                "2. PROTOCOLOS DE MITIGACIÓN HABILITADOS EN CONSOLA\n" +
+                "   • Opciones Disponibles     : %s\n\n" +
+                "----------------------------------------------------------------------\n" +
+                "INGRESE AL GEMELO DIGITAL 3D PARA AUTORIZAR LA MANIOBRA:\n" +
+                "https://scada-ucc-alejandro.77.113.90.86.sslip.io\n" +
+                "----------------------------------------------------------------------\n",
                 request.alertId().value(),
-                request.sensorId().value(),
+                sensorId,
+                location,
                 request.triggerValue(),
                 request.description(),
-                request.availableOptions()
+                formattedDate,
+                String.join("  |  ", request.availableOptions())
         );
         try {
             String snsJson = objectMapper.writeValueAsString(Map.of("subject", subject, "message", msg));

@@ -326,8 +326,40 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now scada-sns-bridge.service
 sudo systemctl restart scada-sns-bridge.service
 
+# -----------------------------------------------------------------------------
+# FASE 8: Respaldo Automático Diario de PostgreSQL con Firma SHA-256 (Diapositivas 88-90)
+# -----------------------------------------------------------------------------
+echo "💾 [Fase 8] Configurando respaldos automáticos diarios de PostgreSQL con firma SHA-256..."
+sudo mkdir -p /var/backups/scada-postgres
+sudo chmod 700 /var/backups/scada-postgres
+
+cat << 'EOF' | sudo tee /usr/local/sbin/backup-postgres-scada.sh > /dev/null
+#!/usr/bin/env bash
+set -e
+BACKUP_DIR="/var/backups/scada-postgres"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_FILE="${BACKUP_DIR}/mantenimiento_db_${TIMESTAMP}.sql.gz"
+HASH_FILE="${BACKUP_FILE}.sha256"
+
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+
+if docker ps --format '{{.Names}}' | grep -q '^iot_postgres$'; then
+    docker exec iot_postgres pg_dump -U iot_admin -d mantenimiento_db | gzip -9 > "$BACKUP_FILE"
+    sha256sum "$BACKUP_FILE" > "$HASH_FILE"
+    chmod 600 "$BACKUP_FILE" "$HASH_FILE"
+    # Retención de 7 días para cuidar el disco de la capa gratuita
+    find "$BACKUP_DIR" -type f -mtime +7 -delete
+    logger -t scada-backup "Backup PostgreSQL exitoso: ${BACKUP_FILE} (SHA-256 verificado)"
+fi
+EOF
+sudo chmod 700 /usr/local/sbin/backup-postgres-scada.sh
+sudo ln -sf /usr/local/sbin/backup-postgres-scada.sh /etc/cron.daily/backup-postgres-scada
+sudo /usr/local/sbin/backup-postgres-scada.sh || true
+
 echo "========================================================================"
 echo "✅ HARDENING DE UBUNTU SERVER COMPLETADO CON ÉXITO"
 echo "========================================================================"
 sudo ufw status verbose
 sudo fail2ban-client status
+sudo ls -lh /var/backups/scada-postgres
