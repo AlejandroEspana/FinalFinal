@@ -133,3 +133,73 @@ Si en la sustentación de **POO Avanzada** te preguntan dónde están los princi
   * [EvaluateSensorTelemetryUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/application/usecase/EvaluateSensorTelemetryUseCase.java#L25-L33): Recibe por constructor las interfaces `AnomalyDetectionStrategy` y `AlertPublisherPort`. No sabe que por debajo existe Kafka.
   * [RouteAlertToHumanUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/application/usecase/RouteAlertToHumanUseCase.java): Recibe por constructor `HumanAlertPublisherPort`. No sabe que por debajo existe RabbitMQ ni Amazon SNS.
   * [ProcessOperatorDecisionUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/application/usecase/ProcessOperatorDecisionUseCase.java#L34-L42): Recibe por constructor `DecisionAuditRepositoryPort` y `ActionCommandPublisherPort`. Gracias a esta inversión de dependencias, en los **49 tests unitarios** podemos inyectar *Mocks* de Mockito en milisegundos sin levantar bases de datos ni brokers reales.
+
+---
+
+## 5. ¿Qué Hicimos en el `docker-compose.yml` y en los `Dockerfile`? (Orquestación de los 15 Contenedores)
+
+Archivo principal: [docker-compose.yml](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml)
+
+El archivo `docker-compose.yml` orquesta **15 contenedores en total** divididos en **3 bloques arquitectónicos**, aplicando buenas prácticas de seguridad, resiliencia y optimización para la Capa Gratuita de AWS:
+
+### 5.1. Bloque 1: Infraestructura de Datos y Mensajería ([Líneas 5 a 101](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L5-L101))
+1. **`postgres` (`postgres:16-alpine`)**:
+   * Monta automáticamente el script DDL [docker/postgres/init.sql](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker/postgres/init.sql) en `/docker-entrypoint-initdb.d/init.sql:ro` para crear la tabla inmutable `operator_decision_audit` y sus índices al arrancar.
+   * **Seguridad de Puerto (`127.0.0.1:5432:5432`)**: Atado exclusivamente al loopback local para que nadie desde Internet pueda conectarse al puerto `5432` (evitando que Docker se salte el firewall UFW).
+   * **Healthcheck activo**: Ejecuta `pg_isready -U iot_admin -d mantenimiento_db` cada 10s.
+2. **`zookeeper` y `kafka` (`confluentinc/cp-kafka:7.6.1`)**:
+   * Configura **`KAFKA_NUM_PARTITIONS: 3`** ([línea 62](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L62)) para que todos los tópicos (`sensor_data`, `alerts_warning`, `alerts_critical`) tengan **3 particiones** y permitan paralelismo manteniendo el orden por clave (`sensorId`).
+   * Puertos confinados en `127.0.0.1:2181` y `127.0.0.1:9092`.
+3. **`rabbitmq` (Imagen personalizada con Plugin `x-delayed-message`)**:
+   * Construye desde [docker/rabbitmq/Dockerfile](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker/rabbitmq/Dockerfile), el cual descarga y habilita el plugin oficial **`rabbitmq_delayed_message_exchange`** (`rabbitmq-plugins enable --offline rabbitmq_delayed_message_exchange`).
+   * Elimina el usuario inseguro por defecto `guest/guest` y configura credenciales propias (`iot_rabbit` / `iot_rabbit_2026`), confinando `5672` y `15672` en `127.0.0.1`.
+
+### 5.2. Bloque 2: Los 8 Microservicios Backend y Escalado Horizontal con Réplicas ([Líneas 105 a 334](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L105-L334))
+1. **Arranque Ordenado por Salud (`depends_on: condition: service_healthy`)**:
+   * Ningún microservicio arranca a ciegas: esperan a que los *healthchecks* de `postgres`, `kafka` y `rabbitmq` estén en estado `healthy`.
+2. **Escalado Horizontal Real (`deploy: replicas: 2`)**:
+   * En **`actuator_worker`** ([línea 299](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L299)) y **`maintenance_worker`** ([línea 327](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L327)) definimos `replicas: 2`. Docker levanta **2 contenedores concurrentes** para cada worker (`finalfinal-actuator_worker-1` y `-2`, `finalfinal-maintenance_worker-1` y `-2`) que consumen las colas de RabbitMQ en balanceo *Round-Robin*.
+3. **Puente Seguro hacia el Demonio Amazon SNS del Host (`extra_hosts`)**:
+   * En `alert_router` ([línea 178](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L178)) y `action_dispatcher` ([línea 269](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L269)) se inyecta `host.docker.internal:host-gateway` para que puedan invocar el servicio local `scada-sns-bridge.service` (`:9099`) sin salir a Internet.
+4. **Control de Recursos (`cpus` y `memory`) y `Dockerfile` Multi-Etapa sin Root**:
+   * Cada contenedor tiene límites estrictos de CPU (`0.25` a `1.00 vCPU`) y RAM (`128M` a `768M`) para evitar que un pico de carga agote la instancia EC2.
+   * Todos los `Dockerfile` de los microservicios compilan con `maven:3.9.6-eclipse-temurin-17-alpine` en la Etapa 1 y ejecutan en la Etapa 2 sobre `eclipse-temurin:17-jre-alpine` con un usuario sin privilegios (`USER appuser`) y `-XX:MaxRAMPercentage=75.0`.
+
+### 5.3. Bloque 3: Único Punto de Entrada Público (`frontend_dashboard` — Nginx Reverse Proxy) ([Líneas 338 a 364](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L338-L364))
+* Construye la SPA **React 18 + TypeScript + Gemelo Digital 3D** en la Etapa 1 de [Frontend/Dockerfile](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Frontend/Dockerfile) y la sirve con **Nginx 1.27 Alpine** en la Etapa 2.
+* Es el **único contenedor que publica los puertos `80` y `443`** al exterior. En [Frontend/nginx.conf](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Frontend/nginx.conf) actúa como **Reverse Proxy** con cifrado TLS 1.2/1.3, cabeceras de defensa (`HSTS`, `X-Frame-Options: DENY`, `nosniff`), *Rate Limiting* y resolución DNS dinámica interna (`resolver 127.0.0.11 valid=10s`) hacia la red privada `iot_industrial_net`.
+
+---
+
+## 6. ¿Qué Hicimos en los Archivos `.sh` de Despliegue y Hardening para Linux?
+
+En la carpeta `aws/` creamos dos scripts automatizados e idempotentes en Bash para Ubuntu Server 24.04 LTS:
+
+### 6.1. Script 1: [aws/deploy-aws.sh](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/deploy-aws.sh) (Aprovisionamiento Base y Despliegue Inicial)
+Este script prepara una máquina virtual recién creada en AWS EC2 en **7 pasos**:
+* **Paso 1**: Actualiza los repositorios `apt` e instala utilidades de red y criptografía (`curl`, `git`, `ca-certificates`, `gnupg`, `ufw`).
+* **Paso 2 (Crítico para la Capa Gratuita)**: Crea y activa un archivo de **Memoria Virtual Swap de 6 GB (`/swapfile`)** sobre el disco SSD EBS (`fallocate -l 6G /swapfile`, `chmod 600`, `mkswap`, `swapon`) y lo registra en `/etc/fstab` con `vm.swappiness=60`. Esto permite que una instancia pequeña de la capa gratuita corra los 15 contenedores con total fluidez.
+* **Paso 3**: Configura en el kernel `vm.max_map_count=262144`, requisito indispensable para el mapeo de memoria de Apache Kafka.
+* **Paso 4**: Instala **Docker Engine** y **Docker Compose v2** desde el repositorio oficial firmado de Docker y habilita el servicio en `systemd`.
+* **Paso 5**: Configura la política base del firewall **UFW** (`default deny incoming`, `limit 22/tcp`, `allow 80/tcp`, `allow 443/tcp`).
+* **Paso 6**: Descarga las imágenes base y compila/levanta los 15 contenedores con `sudo docker compose up -d --build`.
+* **Paso 7**: Invoca automáticamente `./aws/hardening-ubuntu.sh`.
+
+### 6.2. Script 2: [aws/hardening-ubuntu.sh](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh) (Blindaje de Sistemas Operativos en 12 Fases + Integración AWS Cloud)
+Este script implementa la estrategia de **Defensa en Profundidad** sobre Ubuntu Server 24.04 LTS y conecta el servidor con los servicios nativos de AWS:
+
+| Fase en `hardening-ubuntu.sh` | Archivos del Sistema que Configura | ¿Qué hace exactamente en el Servidor Linux? |
+| :--- | :--- | :--- |
+| **Fase 1: Parches Automáticos** ([Líneas 14-27](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L14-L27)) | `/etc/apt/apt.conf.d/20auto-upgrades` | Instala y activa `unattended-upgrades`, `needrestart`, `auditd`, `fail2ban`, `sysstat`, `lynis` y `python3-boto3`. |
+| **Fase 2: Blindaje SSH, Sudo y PAM** ([Líneas 29-91](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L29-L91)) | `/etc/issue.net`<br>`/etc/ssh/sshd_config.d/01-hardening.conf`<br>`/etc/sudoers.d/99-hardening`<br>`/etc/security/pwquality.conf`<br>`/etc/security/faillock.conf` | Coloca el banner legal disuasorio, deshabilita login de `root` y contraseñas en SSH (`PasswordAuthentication no`, `MaxAuthTries 3`), exige `use_pty` y `timestamp_timeout=5` en `sudo`, e impone contraseñas de 14 caracteres y bloqueo PAM tras 5 fallos. |
+| **Fase 3: Firewall UFW + IPS Fail2ban** ([Líneas 93-130](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L93-L130)) | `/etc/fail2ban/jail.local` | Elimina cualquier puerto interno residual en UFW y activa **Fail2ban** con cárceles `sshd` (modo agresivo) y `recidive` (baneo incremental hasta 1 semana para atacantes reincidentes). |
+| **Fase 4: Hardening del Kernel Linux** ([Líneas 132-186](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L132-L186)) | `/etc/sysctl.d/99-hardening.conf`<br>`/etc/systemd/coredump.conf.d/disable.conf`<br>`/etc/modprobe.d/99-hardening.conf` | Activa ASLR nivel 2 (`randomize_va_space=2`), oculta punteros de kernel (`kptr_restrict=2`), activa `tcp_syncookies=1`, bloquea redirecciones ICMP, desactiva volcados de memoria (*Core Dumps*) y bloquea módulos USB/sistemas de archivos obsoletos. |
+| **Fase 5: Vigilancia de Recursos** ([Líneas 188-209](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L188-L209)) | `/usr/local/sbin/check-resources.sh`<br>`/etc/cron.d/check-resources` | Ejecuta cada 5 minutos una auditoría de CPU, RAM y Disco; si superan el umbral (85%/90%), registra en `syslog` los procesos causantes. |
+| **Fase 6: Auditoría Forense `auditd`** ([Líneas 211-235](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L211-L235)) | `/etc/audit/rules.d/99-hardening.rules`<br>`/home/ubuntu/suid_baseline.txt` | Monitorea en el kernel cualquier escritura en `/etc/passwd`, `/etc/shadow`, `/etc/sudoers`, `/etc/ssh` y ejecuciones de `sudo`/`su`, y guarda la línea base de binarios SUID/SGID. |
+| **Fase 7: Demonio Confinado Amazon SNS** ([Líneas 237-328](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L237-L328)) | `/usr/local/sbin/scada-sns-bridge.py`<br>`/etc/systemd/system/scada-sns-bridge.service` | Crea el puente local hacia **Amazon SNS (`scada-iot-alertas-ucc`)** usando credenciales temporales del **Rol IAM (`IMDSv2`)**, confinado en `systemd` con `NoNewPrivileges=true`, `ProtectSystem=strict`, `PrivateTmp=true` y `MemoryMax=128M`. |
+| **Fase 8: Backups PostgreSQL SHA-256 + AWS S3** ([Líneas 330-436](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L330-L436)) | `/usr/local/sbin/backup-postgres-scada.sh`<br>`/usr/local/sbin/upload-backup-s3.py`<br>`/etc/cron.daily/backup-postgres-scada` | Realiza un `pg_dump` diario comprimido (`.sql.gz`), calcula su firma **`SHA-256`** y lo sube cifrado con **`AES-256`** al bucket privado **`s3://scada-ucc-backups-148395526595`**. |
+| **Fase 9: Telemetría a AWS CloudWatch** ([Líneas 438-488](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L438-L488)) | `/usr/local/sbin/push-cloudwatch-metrics.py`<br>`/etc/cron.d/scada-cloudwatch` | Envía cada 5 minutos las métricas de uso de RAM, Swap, Disco y Contenedores activos al Namespace **`SCADA/IndustrialIoT`** en AWS CloudWatch. |
+| **Fase 10: Registro en AWS ACM** ([Líneas 490-536](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L490-L536)) | `/usr/local/sbin/register-acm-cert.py` | Importa y registra oficialmente el certificado TLS del servidor dentro de **AWS Certificate Manager (ACM)** en `us-east-2`. |
+| **Fase 11: Auto-Deploy GitOps desde GitHub** ([Líneas 538-563](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L538-L563)) | `/usr/local/sbin/scada-autodeploy.sh`<br>`/etc/cron.d/scada-autodeploy` | Consulta cada 2 minutos la rama `main` de GitHub; si detecta un nuevo commit, actualiza el código y recompila los contenedores automáticamente. |
+| **Fase 12: Sincronización al Encender EC2** ([Líneas 565-645](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L565-L645)) | `/usr/local/sbin/scada-boot-sync.sh`<br>`/etc/systemd/system/scada-boot-sync.service` | Al apagar y volver a prender la instancia EC2, levanta los 15 contenedores, detecta la nueva IP pública asignada por AWS y actualiza automáticamente **Amazon CloudFront (`https://dnzhr4v1oxvn7.cloudfront.net`)**. |
+
