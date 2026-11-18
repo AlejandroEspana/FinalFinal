@@ -15,7 +15,6 @@ import {
 const wsProtocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const hostOrigin = typeof window !== 'undefined' ? window.location.host : '';
 
-// Comunicación exclusiva a través del Reverse Proxy Nginx sin exponer ningún puerto interno
 export const WS_ENDPOINTS = {
   plantPrimary: `${wsProtocol}//${hostOrigin}/ws-plant`,
   plantFallback: `${wsProtocol}//${hostOrigin}/ws-plant`,
@@ -130,7 +129,6 @@ export async function resetSensorAndMachine(sensorId: string, creds: OperatorCre
     body: JSON.stringify({ sensorId })
   }).catch(() => {});
 
-  // Enviar a ambas réplicas a través del proxy balanceado de Nginx
   await Promise.allSettled([
     fetch(`/api/actuators/${encodeURIComponent(sensorId)}/reset`, {
       method: 'POST',

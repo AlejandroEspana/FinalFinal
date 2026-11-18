@@ -10,9 +10,6 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Servicio de aplicación que expone los casos de uso de despacho y auditoría de decisiones.
- */
 @Service
 public class DecisionOrchestrationService {
 

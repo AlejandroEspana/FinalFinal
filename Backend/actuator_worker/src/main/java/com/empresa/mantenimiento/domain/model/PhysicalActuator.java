@@ -4,10 +4,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Entidad de Dominio Rico que encapsula el estado del actuador físico y ejecuta
- * la transición de emergencia o reactivación protegiendo sus invariantes.
- */
 public class PhysicalActuator {
 
     private final SensorId sensorId;

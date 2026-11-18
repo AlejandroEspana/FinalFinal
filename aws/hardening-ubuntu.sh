@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# =============================================================================
-# Script de Hardening Integral de Ubuntu Server 24.04 LTS en AWS EC2
-# Basado en la Guia de Seguridad en Servidores (Defensa en Profundidad)
-# =============================================================================
 
 set -e
 
@@ -10,9 +6,6 @@ echo "========================================================================"
 echo "[INICIO] APLICANDO HARDENING DE SISTEMAS OPERATIVOS EN UBUNTU SERVER"
 echo "========================================================================"
 
-# -----------------------------------------------------------------------------
-# FASE 1: Actualizaciones Automaticas (unattended-upgrades + needrestart)
-# -----------------------------------------------------------------------------
 echo "[Fase 1] Configurando unattended-upgrades, needrestart y herramientas..."
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -25,9 +18,6 @@ APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 EOF
 
-# -----------------------------------------------------------------------------
-# FASE 2: Blindaje de SSH, Banner Legal, Sudo y PAM (pwquality + faillock)
-# -----------------------------------------------------------------------------
 echo "[Fase 2] Configurando Banner Legal (/etc/issue.net), SSH, Sudo y PAM..."
 
 cat << 'EOF' | sudo tee /etc/issue.net > /dev/null
@@ -60,7 +50,6 @@ EOF
 
 sudo sshd -t && sudo systemctl reload ssh || true
 
-# Endurecer sudo (/etc/sudoers.d/99-hardening)
 cat << 'EOF' | sudo tee /etc/sudoers.d/99-hardening > /dev/null
 Defaults use_pty
 Defaults timestamp_timeout=5
@@ -68,7 +57,6 @@ Defaults passwd_tries=3
 EOF
 sudo chmod 0440 /etc/sudoers.d/99-hardening
 
-# Politicas de contrasenas PAM (/etc/security/pwquality.conf)
 cat << 'EOF' | sudo tee /etc/security/pwquality.conf > /dev/null
 minlen = 14
 minclass = 3
@@ -77,22 +65,17 @@ dictcheck = 1
 enforce_for_root
 EOF
 
-# Bloqueo tras intentos fallidos (/etc/security/faillock.conf)
 cat << 'EOF' | sudo tee /etc/security/faillock.conf > /dev/null
 deny = 5
 unlock_time = 900
 fail_interval = 900
 EOF
 
-# Permisos de archivos criticos del sistema
 sudo chmod 600 /boot/grub/grub.cfg 2>/dev/null || true
 sudo chmod 640 /etc/shadow /etc/gshadow
 sudo chmod 644 /etc/passwd /etc/group
 sudo chmod 700 /root
 
-# -----------------------------------------------------------------------------
-# FASE 3: Firewall UFW + IPS de Host con Fail2ban
-# -----------------------------------------------------------------------------
 echo "[Fase 3] Configurando Firewall UFW y Fail2ban..."
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
@@ -129,12 +112,8 @@ EOF
 sudo systemctl enable --now fail2ban
 sudo systemctl restart fail2ban
 
-# -----------------------------------------------------------------------------
-# FASE 4: Hardening del Kernel Linux (sysctl), Core Dumps y Modulos
-# -----------------------------------------------------------------------------
 echo "[Fase 4] Endureciendo parametros del Kernel (/etc/sysctl.d/99-hardening.conf)..."
 cat << 'EOF' | sudo tee /etc/sysctl.d/99-hardening.conf > /dev/null
-# Nota: ip_forward=1 requerido para el puente de red de Docker Compose
 net.ipv4.ip_forward = 1
 net.ipv4.conf.all.rp_filter = 1
 net.ipv4.conf.default.rp_filter = 1
@@ -149,7 +128,6 @@ net.ipv4.tcp_syncookies = 1
 net.ipv6.conf.all.accept_redirects = 0
 net.ipv6.conf.all.accept_ra = 0
 
-# Memoria y procesos (ASLR y restriccion de punteros del kernel)
 kernel.randomize_va_space = 2
 kernel.kptr_restrict = 2
 kernel.dmesg_restrict = 1
@@ -162,7 +140,6 @@ vm.max_map_count = 262144
 EOF
 sudo sysctl --system > /dev/null
 
-# Deshabilitar Core Dumps
 sudo mkdir -p /etc/systemd/coredump.conf.d
 cat << 'EOF' | sudo tee /etc/systemd/coredump.conf.d/disable.conf > /dev/null
 [Coredump]
@@ -171,7 +148,6 @@ ProcessSizeMax=0
 EOF
 echo "* hard core 0" | sudo tee /etc/security/limits.d/99-nocore.conf > /dev/null
 
-# Bloquear modulos innecesarios
 cat << 'EOF' | sudo tee /etc/modprobe.d/99-hardening.conf > /dev/null
 install cramfs /bin/false
 install freevxfs /bin/false
@@ -184,9 +160,6 @@ install rds /bin/false
 install tipc /bin/false
 EOF
 
-# -----------------------------------------------------------------------------
-# FASE 5: Monitoreo de Recursos (sysstat + script check-resources.sh en cron)
-# -----------------------------------------------------------------------------
 echo "[Fase 5] Activando sysstat y script de vigilancia /usr/local/sbin/check-resources.sh..."
 sudo sed -i 's/ENABLED="false"/ENABLED="true"/' /etc/default/sysstat 2>/dev/null || true
 sudo systemctl enable --now sysstat || true
@@ -207,9 +180,6 @@ EOF
 sudo chmod 700 /usr/local/sbin/check-resources.sh
 echo '*/5 * * * * root /usr/local/sbin/check-resources.sh' | sudo tee /etc/cron.d/check-resources > /dev/null
 
-# -----------------------------------------------------------------------------
-# FASE 6: Auditoria Forense con auditd y Linea Base de Binarios SUID
-# -----------------------------------------------------------------------------
 echo "[Fase 6] Configurando reglas forenses en /etc/audit/rules.d/99-hardening.rules..."
 cat << 'EOF' | sudo tee /etc/audit/rules.d/99-hardening.rules > /dev/null
 -D
@@ -229,13 +199,9 @@ EOF
 sudo augenrules --load 2>/dev/null || true
 sudo systemctl enable --now auditd || true
 
-# Guardar linea base de binarios SUID/SGID
 sudo find / -xdev -perm -4000 -type f 2>/dev/null > /home/ubuntu/suid_baseline.txt || true
 sudo find / -xdev -perm -2000 -type f 2>/dev/null >> /home/ubuntu/suid_baseline.txt || true
 
-# -----------------------------------------------------------------------------
-# FASE 7: Servicio Systemd Confinado para Puente Amazon SNS (IMDSv2)
-# -----------------------------------------------------------------------------
 echo "[Fase 7] Configurando servicio systemd confinado (scada-sns-bridge.service)..."
 
 cat << 'EOF' | sudo tee /usr/local/sbin/scada-sns-bridge.py > /dev/null
@@ -327,9 +293,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now scada-sns-bridge.service
 sudo systemctl restart scada-sns-bridge.service
 
-# -----------------------------------------------------------------------------
-# FASE 8: Respaldo Diario de PostgreSQL con Firma SHA-256 + Replica en AWS S3
-# -----------------------------------------------------------------------------
 echo "[Fase 8] Configurando respaldos de PostgreSQL con firma SHA-256 y replica en Amazon S3..."
 sudo mkdir -p /var/backups/scada-postgres
 sudo chmod 700 /var/backups/scada-postgres
@@ -432,9 +395,6 @@ sudo chmod 700 /usr/local/sbin/backup-postgres-scada.sh
 sudo ln -sf /usr/local/sbin/backup-postgres-scada.sh /etc/cron.daily/backup-postgres-scada
 sudo /usr/local/sbin/backup-postgres-scada.sh || true
 
-# -----------------------------------------------------------------------------
-# FASE 9: Telemetria de Sistema Operativo hacia AWS CloudWatch (Capa Gratuita)
-# -----------------------------------------------------------------------------
 echo "[Fase 9] Configurando envio de metricas RAM/Swap/Disco/Docker hacia AWS CloudWatch..."
 cat << 'EOF' | sudo tee /usr/local/sbin/push-cloudwatch-metrics.py > /dev/null
 #!/usr/bin/env python3
@@ -482,9 +442,6 @@ sudo chmod 700 /usr/local/sbin/push-cloudwatch-metrics.py
 echo '*/5 * * * * root /usr/bin/python3 /usr/local/sbin/push-cloudwatch-metrics.py >/dev/null 2>&1' | sudo tee /etc/cron.d/scada-cloudwatch > /dev/null
 sudo /usr/bin/python3 /usr/local/sbin/push-cloudwatch-metrics.py || true
 
-# -----------------------------------------------------------------------------
-# FASE 10: Registro del Certificado TLS en AWS Certificate Manager (ACM)
-# -----------------------------------------------------------------------------
 echo "[Fase 10] Importando y registrando certificado TLS en AWS Certificate Manager (ACM)..."
 cat << 'EOF' | sudo tee /usr/local/sbin/register-acm-cert.py > /dev/null
 #!/usr/bin/env python3
@@ -529,9 +486,6 @@ EOF
 sudo chmod 700 /usr/local/sbin/register-acm-cert.py
 sudo /usr/bin/python3 /usr/local/sbin/register-acm-cert.py || true
 
-# -----------------------------------------------------------------------------
-# FASE 11: Auto-Deploy Continuo (GitOps) Sincronizado con la Rama main de GitHub
-# -----------------------------------------------------------------------------
 echo "[Fase 11] Configurando Auto-Deploy continuo sincronizado con origin/main de GitHub..."
 cat << 'EOF' | sudo tee /usr/local/sbin/scada-autodeploy.sh > /dev/null
 #!/usr/bin/env bash
@@ -561,9 +515,6 @@ EOF
 sudo chmod 700 /usr/local/sbin/scada-autodeploy.sh
 echo '*/2 * * * * root /usr/local/sbin/scada-autodeploy.sh >> /var/log/scada-autodeploy.log 2>&1' | sudo tee /etc/cron.d/scada-autodeploy > /dev/null
 
-# -----------------------------------------------------------------------------
-# FASE 12: Servicio de Arranque Automatico tras Apagar/Prender la Instancia EC2
-# -----------------------------------------------------------------------------
 echo "[Fase 12] Configurando servicio systemd scada-boot-sync.service (Auto-inicio tras apagar/prender EC2)..."
 cat << 'EOF' | sudo tee /usr/local/sbin/scada-boot-sync.sh > /dev/null
 #!/usr/bin/env bash

@@ -34,7 +34,6 @@ class RabbitMQCriticalActionConsumerAdapterTest {
     @Test
     @DisplayName("Debe deserializar mensaje JSON de critical_actions_queue e invocar executeShutdown")
     void shouldDeserializeCriticalShutdownMessage() {
-        // Arrange
         String json = """
                 {
                   "commandId": "CMD-SHUTDOWN-99",
@@ -45,10 +44,8 @@ class RabbitMQCriticalActionConsumerAdapterTest {
                 }
                 """;
 
-        // Act
         consumerAdapter.onCriticalShutdownMessage(json);
 
-        // Assert
         ArgumentCaptor<ShutdownCommand> captor = ArgumentCaptor.forClass(ShutdownCommand.class);
         verify(orchestrationService, times(1)).executeShutdown(captor.capture());
         assertThat(captor.getValue().commandId()).isEqualTo("CMD-SHUTDOWN-99");

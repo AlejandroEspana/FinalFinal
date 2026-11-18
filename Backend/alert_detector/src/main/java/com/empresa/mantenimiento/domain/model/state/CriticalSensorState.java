@@ -29,7 +29,6 @@ public final class CriticalSensorState implements SensorRiskState {
 
     @Override
     public boolean shouldEmitAlert(DetectionResult result) {
-        // Mientras permanezca en estado CRITICAL no vuelve a emitir duplicados hasta bajar de estado
         return false;
     }
 

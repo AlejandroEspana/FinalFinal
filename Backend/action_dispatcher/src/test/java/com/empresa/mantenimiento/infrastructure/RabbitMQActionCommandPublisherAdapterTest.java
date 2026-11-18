@@ -47,7 +47,6 @@ class RabbitMQActionCommandPublisherAdapterTest {
     @Test
     @DisplayName("Debe enviar mensaje con header x-delay al exchange delayed_actions_exchange")
     void shouldSendMessageWithXDelayHeader() {
-        // Arrange
         MaintenanceWorkOrder wo = new MaintenanceWorkOrder(
                 "WO-DEL-1",
                 new SensorId("sensor_F"),
@@ -58,10 +57,8 @@ class RabbitMQActionCommandPublisherAdapterTest {
                 Instant.now()
         );
 
-        // Act
         adapter.dispatchDelayedMaintenance(wo, 10000L);
 
-        // Assert
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
         verify(rabbitTemplate, times(1)).send(
                 eq("delayed_actions_exchange"),
@@ -77,7 +74,6 @@ class RabbitMQActionCommandPublisherAdapterTest {
     @Test
     @DisplayName("Debe publicar comando de apagado crítico en critical_actions_queue")
     void shouldSendCriticalShutdownToQueue() {
-        // Arrange
         ShutdownCommand cmd = new ShutdownCommand(
                 "CMD-1",
                 new SensorId("sensor_A"),
@@ -86,10 +82,8 @@ class RabbitMQActionCommandPublisherAdapterTest {
                 Instant.now()
         );
 
-        // Act
         adapter.dispatchShutdown(cmd);
 
-        // Assert
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(rabbitTemplate, times(1)).convertAndSend(
                 eq(""),

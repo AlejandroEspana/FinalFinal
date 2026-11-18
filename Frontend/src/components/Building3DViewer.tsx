@@ -23,7 +23,6 @@ interface Sensor3DMeta {
   floor: 1 | 2 | 3;
   floorName: string;
   machineName: string;
-  /** Coordenadas normalizadas en el piso (-1 a 1) */
   rx: number;
   rz: number;
 }
@@ -75,7 +74,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
     return map;
   }, [sensors]);
 
-  // Si algún sensor entra en estado crítico, seleccionarlo automáticamente para resaltarlo
   useEffect(() => {
     const criticalSensor = sensors.find(
       (s) => s.severity === 'CRITICAL' || s.operationalStatus === 'EMERGENCY_HALTED'
@@ -119,7 +117,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
       const cx = width * 0.5;
       const cy = height * 0.56;
 
-      // Fondo arquitectónico crema cálido con gradiente suave
       const bgGrad = ctx.createRadialGradient(cx, cy * 0.8, 30, cx, cy, Math.max(width, height) * 0.75);
       bgGrad.addColorStop(0, '#FFFDF9');
       bgGrad.addColorStop(0.65, '#F6EFE2');
@@ -147,7 +144,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
         };
       };
 
-      // 1. Dibujar grilla de terreno arquitectónico (Base nivel 0)
       ctx.strokeStyle = 'rgba(166, 148, 120, 0.22)';
       ctx.lineWidth = 1;
       for (let g = -1.6; g <= 1.61; g += 0.4) {
@@ -174,7 +170,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
 
       const newHits: ProjectedNodeHit[] = [];
 
-      // Iterar los 3 niveles de abajo hacia arriba (algoritmo del pintor)
       ([1, 2, 3] as const).forEach((floorNum) => {
         if (selectedFloor !== 'ALL' && selectedFloor !== floorNum) {
           return;
@@ -192,13 +187,11 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
           (m) => sensorMap.get(m.sensorId)?.severity === 'WARNING'
         );
 
-        // Vértices de la losa del piso
         const c0 = project(-bw, y0, -bd);
         const c1 = project(bw, y0, -bd);
         const c2 = project(bw, y0, bd);
         const c3 = project(-bw, y0, bd);
 
-        // Sombra / Losa del piso
         ctx.beginPath();
         ctx.moveTo(c0.x, c0.y);
         ctx.lineTo(c1.x, c1.y);
@@ -220,7 +213,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // Divisiones internas de cuartos en la losa
         const midX1 = project(0, y0, -bd);
         const midX2 = project(0, y0, bd);
         const midZ1 = project(-bw, y0, 0);
@@ -234,7 +226,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
         ctx.lineTo(midZ2.x, midZ2.y);
         ctx.stroke();
 
-        // Columnas estructurales 3D del piso
         const t0 = project(-bw, y1, -bd);
         const t1 = project(bw, y1, -bd);
         const t2 = project(bw, y1, bd);
@@ -254,14 +245,12 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
           ctx.stroke();
         });
 
-        // Etiqueta lateral del Nivel
         const labelAnchor = project(-bw - 0.18, y0 + 0.1, bd);
         ctx.fillStyle = '#4A3F35';
         ctx.font = 'bold 11px Inter, system-ui, sans-serif';
         ctx.textAlign = 'right';
         ctx.fillText(`NIVEL ${floorNum}`, labelAnchor.x, labelAnchor.y);
 
-        // Dibujar cada sensor / máquina 3D dentro de este piso (ordenado por profundidad)
         const sortedSensors = [...floorSensors].sort((a, b) => {
           const pa = project(a.rx * bw, y0, a.rz * bd);
           const pb = project(b.rx * bw, y0, b.rz * bd);
@@ -283,7 +272,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
           const basePos = project(sx, y0 + 0.04, sz);
           const topPos = project(sx, y0 + 0.19, sz);
 
-          // Anillos de onda expansiva si el sensor está afectado (CRITICAL o WARNING)
           if (isCritical || isWarning) {
             const pulseRadius = (16 + ((phase * 14) % 24)) * basePos.scale;
             ctx.beginPath();
@@ -302,7 +290,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            // Haz vertical de alerta en el edificio
             const beamTop = project(sx, y0 + 0.36, sz);
             const beamGrad = ctx.createLinearGradient(basePos.x, basePos.y, beamTop.x, beamTop.y);
             beamGrad.addColorStop(
@@ -318,7 +305,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
             ctx.stroke();
           }
 
-          // Pedestal / Cilindro 3D de la máquina
           const nodeRadius = (isSelected ? 12.5 : 10) * topPos.scale;
           ctx.beginPath();
           ctx.moveTo(basePos.x - nodeRadius, basePos.y);
@@ -335,7 +321,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
             : '#059669';
           ctx.fill();
 
-          // Esfera / Corona superior del sensor
           ctx.beginPath();
           ctx.arc(topPos.x, topPos.y, nodeRadius, 0, Math.PI * 2);
           ctx.fillStyle = isHalted
@@ -350,7 +335,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
           ctx.strokeStyle = isSelected ? '#1E293B' : '#FFFDF9';
           ctx.stroke();
 
-          // Etiqueta flotante sobre el sensor
           const labelY = topPos.y - nodeRadius - 7;
           const tagText = `${meta.sensorId.replace('sensor_', 'S-')} • ${vib.toFixed(0)}mm/s`;
           ctx.font = `${isSelected || isCritical ? 'bold ' : ''}10px ui-monospace, monospace`;
@@ -386,7 +370,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
           });
         });
 
-        // Techo cristalino superior en el Nivel 3
         if (floorNum === 3) {
           ctx.beginPath();
           ctx.moveTo(t0.x, t0.y);
@@ -416,7 +399,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
     isDraggingRef.current = true;
     lastMouseRef.current = { x: e.clientX, y: e.clientY };
 
-    // Verificar si hizo clic sobre un nodo sensor 3D
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -471,7 +453,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
           </div>
         </div>
 
-        {/* Controles de cámara y pisos 3D */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <div className="flex items-center bg-[#F6EFE2] border border-[#E2D6C1] rounded-lg p-0.5">
             {(['ALL', 1, 2, 3] as const).map((fl) => (
@@ -528,7 +509,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 mt-4">
-        {/* Lienzo 3D Interactivo (8 cols) */}
         <div className="lg:col-span-8 relative rounded-xl overflow-hidden border border-[#E2D6C1] bg-[#F6EFE2] h-[390px]">
           <canvas
             ref={canvasRef}
@@ -539,7 +519,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
             className="w-full h-full cursor-grab active:cursor-grabbing block"
           />
 
-          {/* Leyenda de Estados en el Modelo 3D */}
           <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-3 bg-[#FFFDF9]/90 backdrop-blur-sm border border-[#DFD2BC] rounded-lg px-3 py-1.5 text-[11px] text-[#4A3F35] shadow-sm">
             <span className="flex items-center gap-1.5 font-medium">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block" />
@@ -555,7 +534,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
             </span>
           </div>
 
-          {/* Controles de Zoom en esquina */}
           <div className="absolute top-3 right-3 flex flex-col gap-1">
             <button
               onClick={() => setZoom((z) => Math.min(1.5, z + 0.12))}
@@ -572,7 +550,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
           </div>
         </div>
 
-        {/* Panel Inspector del Activo Seleccionado en el Edificio 3D (4 cols) */}
         <div className="lg:col-span-4 bg-[#FAF6EE] border border-[#E5DCCB] rounded-xl p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between border-b border-[#E5DCCB] pb-3">
@@ -627,7 +604,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
               </div>
             </div>
 
-            {/* Selector rápido de sensores por piso */}
             <div className="mt-3">
               <span className="text-[11px] font-semibold text-[#6E6256] block mb-1.5">
                 Seleccionar Sensor en el Edificio:
@@ -661,7 +637,6 @@ export const Building3DViewer: React.FC<Building3DViewerProps> = ({
             </div>
           </div>
 
-          {/* Acciones de Simulación Directa sobre el Sensor 3D */}
           <div className="mt-4 pt-3 border-t border-[#E5DCCB] flex flex-col gap-2">
             <div className="flex gap-2">
               <button

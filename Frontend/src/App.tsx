@@ -536,7 +536,6 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-[#F7F2E9] text-[#2C2523] flex flex-col">
-      {/* Top Navbar en Tonos Crema y Bronce */}
       <header className="sticky top-0 z-30 border-b border-[#E2D6C1] bg-[#FFFDF9]/95 backdrop-blur-md px-6 py-3.5 shadow-sm">
         <div className="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -622,7 +621,6 @@ export function App() {
         </div>
       </header>
 
-      {/* Banner de Respuesta Real */}
       {feedbackBanner && (
         <div className="max-w-[1600px] w-full mx-auto px-6 pt-4">
           <div
@@ -653,9 +651,7 @@ export function App() {
         </div>
       )}
 
-      {/* Main Content Grid */}
       <main className="max-w-[1600px] w-full mx-auto px-6 py-6 flex-1 space-y-6">
-        {/* KPIs Superiores en Tarjetas Crema Claro */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-xl p-4 flex items-center justify-between shadow-sm">
             <div>
@@ -698,16 +694,13 @@ export function App() {
           </div>
         </div>
 
-        {/* NUEVO: Modelo 3D Interactivo del Edificio Industrial */}
         <Building3DViewer
           sensors={sensors}
           onInjectSpike={handleInjectSpike}
           onResetMachine={handleResetMachine}
         />
 
-        {/* Bloque Principal: Mapa de Sensores SCADA (Izquierda) + Consola de Decisiones del Operador (Derecha) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Columna Izquierda (7 cols): Tarjetas de Telemetría */}
           <section className="lg:col-span-7 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 flex flex-col shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-[#EDE4D3]">
               <div>
@@ -800,7 +793,6 @@ export function App() {
             </div>
           </section>
 
-          {/* Columna Derecha (5 cols): Consola Interactiva de Decisiones del Operador */}
           <section className="lg:col-span-5 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 flex flex-col shadow-sm">
             <div className="pb-4 border-b border-[#EDE4D3] flex items-center justify-between">
               <div>
@@ -960,7 +952,6 @@ export function App() {
           </section>
         </div>
 
-        {/* SECCIÓN PLUS: Centro de Boletines Corporativos vía Amazon SNS + Hardening Ubuntu Server */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <section className="lg:col-span-6 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 flex flex-col justify-between shadow-sm">
             <div>
@@ -1045,7 +1036,6 @@ export function App() {
             </div>
           </section>
 
-          {/* Panel Hardening Ubuntu Server 24.04 LTS en AWS EC2 */}
           <section className="lg:col-span-6 bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3 border-b border-[#EDE4D3]">
               <div className="flex items-center gap-2">
@@ -1082,7 +1072,6 @@ export function App() {
           </section>
         </div>
 
-        {/* Sección Inferior 1: Ejecución en Workers Concurrentes */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <section className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3 border-b border-[#EDE4D3]">
@@ -1185,7 +1174,6 @@ export function App() {
           </section>
         </div>
 
-        {/* Sección Inferior 2: Tabla de Auditoría Transaccional en PostgreSQL */}
         <section className="bg-[#FFFDF9] border border-[#E5DCCB] rounded-2xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#EDE4D3]">
             <div className="flex items-center gap-2.5">

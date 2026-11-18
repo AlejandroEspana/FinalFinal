@@ -1,7 +1,4 @@
 services:
-  # ============================================================================
-  # 1. INFRAESTRUCTURA DE DATOS Y MENSAJERÍA (Confinados en 127.0.0.1)
-  # ============================================================================
   postgres:
     image: postgres:16-alpine
     container_name: iot_postgres
@@ -99,9 +96,6 @@ services:
     networks:
       - iot_industrial_net
 
-  # ============================================================================
-  # 2. MICROSERVICIOS BACKEND (Confinados en 127.0.0.1 detrás de Nginx Reverse Proxy)
-  # ============================================================================
   sensor_producer:
     build:
       context: ./Backend/sensor_producer
@@ -332,9 +326,6 @@ services:
     networks:
       - iot_industrial_net
 
-  # ============================================================================
-  # 3. FRONTEND DASHBOARD + REVERSE PROXY NGINX (Único punto de entrada público)
-  # ============================================================================
   frontend_dashboard:
     build:
       context: ./Frontend

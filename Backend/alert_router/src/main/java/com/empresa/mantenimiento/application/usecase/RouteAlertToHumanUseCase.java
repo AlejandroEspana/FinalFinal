@@ -11,10 +11,6 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Caso de Uso: Traduce una alerta de Kafka en una solicitud de acción humana
- * con opciones polimórficas y la publica en el Fanout Exchange 'human_alerts'.
- */
 @Component
 public class RouteAlertToHumanUseCase {
 

@@ -35,13 +35,10 @@ class GenerateTelemetryBatchUseCaseTest {
     @Test
     @DisplayName("Debe generar y publicar lecturas para exactamente 10 sensores industriales sin abrir sockets")
     void shouldPublishTenReadingsInEachBatch() {
-        // Arrange
         ArgumentCaptor<VibrationReadingRecord> captor = ArgumentCaptor.forClass(VibrationReadingRecord.class);
 
-        // Act
         List<TelemetryEventDto> batch = useCase.executeBatch();
 
-        // Assert
         assertThat(batch).hasSize(10);
         verify(publisherPort, times(10)).publish(captor.capture());
 

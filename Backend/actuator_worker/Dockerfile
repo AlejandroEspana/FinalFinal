@@ -1,6 +1,3 @@
-# ==============================================================================
-# ETAPA 1: Builder (Compilación con Maven y JDK 17 optimizando caché de capas)
-# ==============================================================================
 FROM maven:3.9.6-eclipse-temurin-17-alpine AS builder
 WORKDIR /build
 
@@ -10,9 +7,6 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -DskipTests -B
 
-# ==============================================================================
-# ETAPA 2: Runtime (Imagen ligera JRE Alpine con principio de menor privilegio)
-# ==============================================================================
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 

@@ -9,10 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
-/**
- * Caso de Uso: Permite inyectar una lectura manual específica (ej. pico crítico o advertencia)
- * para validar escenarios de extremo a extremo desde el Frontend.
- */
 @Component
 public class InjectCustomReadingUseCase {
 

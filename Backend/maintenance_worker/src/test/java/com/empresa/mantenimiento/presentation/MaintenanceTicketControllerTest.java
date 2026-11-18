@@ -35,15 +35,12 @@ class MaintenanceTicketControllerTest {
     @Test
     @DisplayName("Debe retornar tickets de mantenimiento en GET /api/v1/maintenance/tickets")
     void shouldReturnAllTickets() {
-        // Arrange
         when(orchestrationService.getAllTickets()).thenReturn(List.of(
                 new MaintenanceTicketDto("WO-1", "sensor_B", "Urgente", true, 10000L, "operator", "COMPLETED", "OK", Instant.now(), Instant.now())
         ));
 
-        // Act
         ResponseEntity<List<MaintenanceTicketResponse>> response = controller.getAllTickets();
 
-        // Assert
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).hasSize(1);
         assertThat(response.getBody().get(0).workOrderId()).isEqualTo("WO-1");

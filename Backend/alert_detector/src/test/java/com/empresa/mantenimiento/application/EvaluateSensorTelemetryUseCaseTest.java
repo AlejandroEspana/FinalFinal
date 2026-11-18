@@ -41,14 +41,11 @@ class EvaluateSensorTelemetryUseCaseTest {
     @Test
     @DisplayName("Debe despachar exactamente 1 alerta CRITICAL ante una lectura > 90")
     void shouldPublishCriticalAlertOnSpike() {
-        // Arrange
         VibrationReadingRecord reading = VibrationReadingRecord.of("sensor_A", 97.2);
         ArgumentCaptor<IndustrialAlert> captor = ArgumentCaptor.forClass(IndustrialAlert.class);
 
-        // Act
         Optional<IndustrialAlert> result = useCase.execute(reading);
 
-        // Assert
         assertThat(result).isPresent();
         verify(alertPublisher, times(1)).publishAlert(captor.capture());
         assertThat(captor.getValue().severity()).isEqualTo(AlertSeverity.CRITICAL);

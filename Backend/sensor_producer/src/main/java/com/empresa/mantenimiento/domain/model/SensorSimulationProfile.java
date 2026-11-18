@@ -3,10 +3,6 @@ package com.empresa.mantenimiento.domain.model;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Entidad de Dominio Rico que modela el perfil y estado operativo de simulación
- * de un sensor físico en la planta. Protege sus invariantes sin setters públicos.
- */
 public class SensorSimulationProfile {
 
     private final SensorId sensorId;
@@ -23,9 +19,6 @@ public class SensorSimulationProfile {
         this.lastEmittedAt = Instant.now();
     }
 
-    /**
-     * Método semántico de negocio: registra una lectura emitida por este sensor.
-     */
     public synchronized VibrationReadingRecord registrarEmision(double vibrationValue) {
         VibrationReadingRecord record = new VibrationReadingRecord(this.sensorId, vibrationValue, Instant.now());
         this.lastGeneratedVibration = vibrationValue;

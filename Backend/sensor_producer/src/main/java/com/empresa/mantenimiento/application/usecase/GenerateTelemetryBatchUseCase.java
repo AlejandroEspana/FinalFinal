@@ -15,10 +15,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * Caso de Uso: Genera y publica una ráfaga de telemetría para los 10 sensores industriales.
- * Aplica Inyección Estricta por Constructor (DIP).
- */
 @Component
 public class GenerateTelemetryBatchUseCase {
 

@@ -8,10 +8,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Value Object inmutable que representa el identificador único de una alerta industrial.
- * Aplica validaciones Fail-Fast en su constructor compacto y serialización JSON plana.
- */
 public record AlertId(@JsonValue String value) implements Serializable {
 
     public AlertId {

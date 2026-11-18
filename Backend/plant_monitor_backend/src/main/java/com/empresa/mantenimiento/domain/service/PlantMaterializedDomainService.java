@@ -8,9 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Servicio de Dominio Puro (sin dependencias de Spring) que mantiene la vista materializada de los 10 sensores.
- */
 public class PlantMaterializedDomainService {
 
     private final Map<String, SensorPlantStatusView> views = new ConcurrentHashMap<>();

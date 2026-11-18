@@ -18,13 +18,10 @@ class VibrationReadingRecordTest {
     @Test
     @DisplayName("AAA: Debe instanciar una lectura inmutable válida y proteger invariantes del perfil")
     void shouldCreateValidReadingAndRegisterInProfile() {
-        // Arrange
         SensorSimulationProfile profile = new SensorSimulationProfile(SensorId.of("sensor_A"), "Sector #1");
 
-        // Act
         VibrationReadingRecord reading = profile.registrarEmision(48.5);
 
-        // Assert
         assertThat(reading.sensorId().value()).isEqualTo("sensor_A");
         assertThat(reading.vibrationValue()).isEqualTo(48.5);
         assertThat(profile.getTotalReadingsEmitted()).isEqualTo(1L);

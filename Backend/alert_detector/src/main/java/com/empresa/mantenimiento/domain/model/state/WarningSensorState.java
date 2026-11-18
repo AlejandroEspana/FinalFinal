@@ -29,7 +29,6 @@ public final class WarningSensorState implements SensorRiskState {
 
     @Override
     public boolean shouldEmitAlert(DetectionResult result) {
-        // Solo emite alerta si escala de WARNING a CRITICAL; suprime alertas repetidas en WARNING
         return result.severity() == AlertSeverity.CRITICAL;
     }
 

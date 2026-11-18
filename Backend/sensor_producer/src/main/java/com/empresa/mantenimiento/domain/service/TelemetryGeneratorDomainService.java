@@ -4,18 +4,8 @@ import com.empresa.mantenimiento.shared.util.NumberRounderUtil;
 
 import java.util.concurrent.ThreadLocalRandom;
 
-/**
- * Servicio de Dominio Puro (sin dependencias de Spring) encargado de generar valores
- * estocásticos realistas de vibración RMS sin saturar el flujo de alertas.
- */
 public class TelemetryGeneratorDomainService {
 
-    /**
-     * Genera un valor aleatorio de vibración (mm/s) con distribución industrial realista:
-     * - 97% probabilidad: operación normal estable (22.0 - 54.0 mm/s)
-     * - 2% probabilidad: degradación / advertencia (76.0 - 84.0 mm/s)
-     * - 1% probabilidad: pico crítico (> 90.0 mm/s)
-     */
     public double calculateNextRandomVibration() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int roll = random.nextInt(100);

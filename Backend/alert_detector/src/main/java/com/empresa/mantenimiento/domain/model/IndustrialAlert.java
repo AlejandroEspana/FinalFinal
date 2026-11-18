@@ -4,9 +4,6 @@ import java.io.Serializable;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Evento de dominio inmutable que representa una alerta industrial detectada.
- */
 public record IndustrialAlert(
         AlertId alertId,
         SensorId sensorId,

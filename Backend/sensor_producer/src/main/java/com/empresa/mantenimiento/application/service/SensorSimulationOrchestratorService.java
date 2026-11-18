@@ -11,9 +11,6 @@ import org.springframework.stereotype.Service;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Servicio de Aplicación que orquesta el ciclo periódico de emisión de telemetría hacia Kafka.
- */
 @Service
 public class SensorSimulationOrchestratorService {
 

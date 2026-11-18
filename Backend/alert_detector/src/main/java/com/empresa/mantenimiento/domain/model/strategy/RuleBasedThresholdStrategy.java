@@ -5,11 +5,6 @@ import com.empresa.mantenimiento.domain.model.VibrationReadingRecord;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Estrategia de detección basada en reglas de umbral:
- * - Regla 1 (Crítica): Lectura actual > 90.0
- * - Regla 2 (Advertencia): Al menos 3 lecturas acumuladas en la ventana > 75.0
- */
 public final class RuleBasedThresholdStrategy implements AnomalyDetectionStrategy {
 
     public static final double CRITICAL_THRESHOLD = 90.0;

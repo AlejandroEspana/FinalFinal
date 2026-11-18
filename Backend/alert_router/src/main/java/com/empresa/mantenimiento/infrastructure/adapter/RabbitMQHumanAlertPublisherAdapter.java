@@ -25,10 +25,6 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Adaptador RabbitMQ que publica en el Fanout Exchange 'human_alerts' y emite boletín técnico
- * formal exclusivamente hacia Amazon SNS con control de tasa (cooldown de 60s).
- */
 @Component
 public class RabbitMQHumanAlertPublisherAdapter implements HumanAlertPublisherPort {
 

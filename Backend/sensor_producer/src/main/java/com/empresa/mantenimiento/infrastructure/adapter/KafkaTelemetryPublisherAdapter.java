@@ -12,10 +12,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
-/**
- * Adaptador de infraestructura Kafka que implementa TelemetryEventPublisherPort.
- * Aplica particionamiento por clave (key = sensorId) para garantizar el orden por sensor.
- */
 @Component
 public class KafkaTelemetryPublisherAdapter implements TelemetryEventPublisherPort {
 

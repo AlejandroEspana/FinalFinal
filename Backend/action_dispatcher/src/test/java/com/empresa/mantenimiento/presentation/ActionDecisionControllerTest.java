@@ -41,7 +41,6 @@ class ActionDecisionControllerTest {
     @Test
     @DisplayName("Debe procesar petición válida POST /decide y retornar DecisionDispatchedResponse")
     void shouldProcessDecisionRequestSuccessfully() {
-        // Arrange
         OperatorDecisionRequest request = new OperatorDecisionRequest(
                 "ALT-900",
                 "sensor_A",
@@ -61,10 +60,8 @@ class ActionDecisionControllerTest {
         );
         when(orchestrationService.processDecision(any(OperatorDecisionRecord.class))).thenReturn(mockResult);
 
-        // Act
         ResponseEntity<DecisionDispatchedResponse> response = controller.submitDecision(request);
 
-        // Assert
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().auditRecordId()).isEqualTo(55L);
@@ -74,7 +71,6 @@ class ActionDecisionControllerTest {
     @Test
     @DisplayName("Seguridad de Auditoría: Usa el usuario autenticado (Authentication) e impide suplantación de operatorId")
     void shouldUseAuthenticatedPrincipalOverSpoofedRequestOperatorId() {
-        // Arrange
         OperatorDecisionRequest spoofedRequest = new OperatorDecisionRequest(
                 "ALT-901",
                 "sensor_B",
@@ -88,10 +84,8 @@ class ActionDecisionControllerTest {
         );
         when(orchestrationService.processDecision(any(OperatorDecisionRecord.class))).thenReturn(mockResult);
 
-        // Act
         controller.submitDecision(spoofedRequest, auth);
 
-        // Assert
         ArgumentCaptor<OperatorDecisionRecord> captor = ArgumentCaptor.forClass(OperatorDecisionRecord.class);
         verify(orchestrationService).processDecision(captor.capture());
         assertThat(captor.getValue().operatorId()).isEqualTo("operator");

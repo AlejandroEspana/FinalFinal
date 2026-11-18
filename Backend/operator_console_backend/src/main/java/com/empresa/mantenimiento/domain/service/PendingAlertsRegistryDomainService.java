@@ -8,10 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Servicio de Dominio Puro (sin anotaciones de Spring) que administra las alertas interactivas
- * pendientes de decisión humana con cota máxima de memoria (evitando crecimiento ilimitado).
- */
 public class PendingAlertsRegistryDomainService {
 
     public static final int MAX_PENDING_SESSIONS = 100;

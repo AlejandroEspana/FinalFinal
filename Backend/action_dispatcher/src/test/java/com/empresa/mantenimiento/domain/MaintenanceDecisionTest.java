@@ -13,15 +13,11 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * Pruebas unitarias aisladas de Dominio Rico (en memoria RAM, patrón AAA).
- */
 class MaintenanceDecisionTest {
 
     @Test
     @DisplayName("Debe aplicar semánticamente APAGADO_INMEDIATO enrutando a critical_actions_queue")
     void shouldApplyImmediateShutdownAction() {
-        // Arrange
         OperatorDecisionRecord record = new OperatorDecisionRecord(
                 new AlertId("ALT-001"),
                 new SensorId("sensor_A"),
@@ -32,10 +28,8 @@ class MaintenanceDecisionTest {
         );
         MaintenanceDecision decision = new MaintenanceDecision(record);
 
-        // Act
         decision.aplicarAccion(10000L);
 
-        // Assert
         assertThat(decision.getStatus()).isEqualTo("DISPATCHED");
         assertThat(decision.getRoutingTarget()).isEqualTo("critical_actions_queue");
         assertThat(decision.getDelayMillis()).isZero();
@@ -45,7 +39,6 @@ class MaintenanceDecisionTest {
     @Test
     @DisplayName("Debe configurar delayMillis cuando la acción es RECONOCER_Y_ESPERAR_24H")
     void shouldConfigureDelayedMaintenanceExchange() {
-        // Arrange
         OperatorDecisionRecord record = new OperatorDecisionRecord(
                 new AlertId("ALT-002"),
                 new SensorId("sensor_B"),
@@ -56,10 +49,8 @@ class MaintenanceDecisionTest {
         );
         MaintenanceDecision decision = new MaintenanceDecision(record);
 
-        // Act
         decision.aplicarAccion(10000L);
 
-        // Assert
         assertThat(decision.getStatus()).isEqualTo("DISPATCHED");
         assertThat(decision.getDelayMillis()).isEqualTo(10000L);
         assertThat(decision.getRoutingTarget()).contains("delayed_actions_exchange");
@@ -68,7 +59,6 @@ class MaintenanceDecisionTest {
     @Test
     @DisplayName("Debe lanzar InvalidDecisionActionException ante una acción desconocida (Fail-Fast)")
     void shouldRejectInvalidAction() {
-        // Arrange
         OperatorDecisionRecord invalidRecord = new OperatorDecisionRecord(
                 new AlertId("ALT-003"),
                 new SensorId("sensor_C"),
@@ -78,7 +68,6 @@ class MaintenanceDecisionTest {
                 "Nota"
         );
 
-        // Act & Assert
         assertThatThrownBy(() -> new MaintenanceDecision(invalidRecord))
                 .isInstanceOf(InvalidDecisionActionException.class);
     }

@@ -88,20 +88,17 @@ class SensorVibrationWindowTest {
         );
         assertThat(firstWarning).isPresent();
 
-        // Lectura adicional en WARNING no debe causar tormenta de alertas duplicadas
         Optional<IndustrialAlert> duplicateWarning = window.procesarTelemetria(
                 VibrationReadingRecord.of("sensor_A", 82.0), ruleStrategy
         );
         assertThat(duplicateWarning).isEmpty();
 
-        // Escalamiento de WARNING -> CRITICAL sí debe emitir alerta CRITICAL
         Optional<IndustrialAlert> escalatedCritical = window.procesarTelemetria(
                 VibrationReadingRecord.of("sensor_A", 96.0), ruleStrategy
         );
         assertThat(escalatedCritical).isPresent();
         assertThat(escalatedCritical.get().severity()).isEqualTo(AlertSeverity.CRITICAL);
 
-        // Retorno a NORMAL cuando la ventana se llena de lecturas seguras
         window.procesarTelemetria(VibrationReadingRecord.of("sensor_A", 30.0), ruleStrategy);
         window.procesarTelemetria(VibrationReadingRecord.of("sensor_A", 31.0), ruleStrategy);
         window.procesarTelemetria(VibrationReadingRecord.of("sensor_A", 32.0), ruleStrategy);

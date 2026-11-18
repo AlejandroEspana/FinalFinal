@@ -1,6 +1,3 @@
-# =========================================================================
-# Etapa 1: Compilación / Builder (Maven + OpenJDK 17 Alpine)
-# =========================================================================
 FROM maven:3.9.6-eclipse-temurin-17-alpine AS builder
 
 WORKDIR /app
@@ -11,9 +8,6 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-# =========================================================================
-# Etapa 2: Ejecución Ligera / Runtime (Temurin JRE 17 Alpine)
-# =========================================================================
 FROM eclipse-temurin:17-jre-alpine AS runtime
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

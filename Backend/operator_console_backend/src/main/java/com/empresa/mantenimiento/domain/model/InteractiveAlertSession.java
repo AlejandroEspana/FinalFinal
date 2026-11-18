@@ -3,9 +3,6 @@ package com.empresa.mantenimiento.domain.model;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Entidad de Dominio Rico que modela el ciclo de vida de una alerta interactiva en consola.
- */
 public class InteractiveAlertSession {
 
     private final HumanActionRequest request;

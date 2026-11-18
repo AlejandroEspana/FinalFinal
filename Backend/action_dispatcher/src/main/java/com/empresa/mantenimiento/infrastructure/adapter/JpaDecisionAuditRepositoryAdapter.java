@@ -11,9 +11,6 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Adaptador de Infraestructura JPA que implementa el puerto de auditoría en PostgreSQL.
- */
 @Component
 public class JpaDecisionAuditRepositoryAdapter implements DecisionAuditRepositoryPort {
 

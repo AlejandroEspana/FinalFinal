@@ -40,16 +40,13 @@ class KafkaTelemetryPublisherAdapterTest {
     @Test
     @DisplayName("Debe publicar al topic sensor_data utilizando sensorId como clave de partición")
     void shouldPublishWithSensorIdAsPartitionKey() {
-        // Arrange
         VibrationReadingRecord reading = VibrationReadingRecord.of("sensor_A", 95.5);
         CompletableFuture<SendResult<String, String>> future = new CompletableFuture<>();
         when(kafkaTemplate.send(eq("sensor_data"), eq("sensor_A"), any())).thenReturn(future);
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
 
-        // Act
         adapter.publish(reading);
 
-        // Assert
         verify(kafkaTemplate).send(eq("sensor_data"), eq("sensor_A"), payloadCaptor.capture());
         assertThat(payloadCaptor.getValue()).contains("sensor_A").contains("95.5");
     }

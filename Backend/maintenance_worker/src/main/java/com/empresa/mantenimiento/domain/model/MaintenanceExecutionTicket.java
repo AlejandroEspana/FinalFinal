@@ -3,10 +3,6 @@ package com.empresa.mantenimiento.domain.model;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Entidad de Dominio Rico que representa un ticket técnico de mantenimiento y
- * gestiona su ciclo de vida sin setters anémicos.
- */
 public class MaintenanceExecutionTicket {
 
     private final MaintenanceWorkOrder workOrder;

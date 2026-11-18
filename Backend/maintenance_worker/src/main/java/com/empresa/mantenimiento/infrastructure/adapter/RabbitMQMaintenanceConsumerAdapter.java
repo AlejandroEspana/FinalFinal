@@ -14,10 +14,6 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Adaptador de Entrada RabbitMQ que consume órdenes de mantenimiento inmediatas
- * y diferidas (liberadas por delayed_actions_exchange) desde maintenance_queue.
- */
 @Component
 public class RabbitMQMaintenanceConsumerAdapter {
 

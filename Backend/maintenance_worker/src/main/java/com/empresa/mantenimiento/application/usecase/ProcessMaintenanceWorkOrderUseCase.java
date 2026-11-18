@@ -11,9 +11,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
-/**
- * Caso de Uso: Procesa órdenes de mantenimiento inmediatas o diferidas consumidas de maintenance_queue.
- */
 @Component
 public class ProcessMaintenanceWorkOrderUseCase {
 

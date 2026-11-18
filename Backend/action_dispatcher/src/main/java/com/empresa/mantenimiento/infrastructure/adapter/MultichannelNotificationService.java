@@ -26,11 +26,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/**
- * Adaptador de Notificaciones Industriales con formato corporativo ISO 10816-3:
- * Despacho oficial mediante Amazon SNS (arn:aws:sns:us-east-2:148395526595:scada-iot-alertas-ucc)
- * hacia Correo Electrónico Institucional y SMS Cloud.
- */
 @Service
 public class MultichannelNotificationService {
 

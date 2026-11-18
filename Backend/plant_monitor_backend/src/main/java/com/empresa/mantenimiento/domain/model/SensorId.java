@@ -7,10 +7,6 @@ import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * Value Object inmutable que representa el identificador único de un sensor industrial.
- * Aplica validaciones Fail-Fast en su constructor compacto y serialización JSON plana.
- */
 public record SensorId(@JsonValue String value) implements Serializable {
 
     public SensorId {

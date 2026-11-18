@@ -8,9 +8,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Value Object inmutable enviado al Fanout Exchange 'human_alerts' de RabbitMQ.
- */
 public record HumanActionRequest(
         AlertId alertId,
         SensorId sensorId,

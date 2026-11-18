@@ -5,9 +5,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/**
- * DTO de Entrada (Bean Validation) para la decisión del operador humano.
- */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record OperatorDecisionRequest(
         @NotBlank(message = "El alertId es obligatorio")

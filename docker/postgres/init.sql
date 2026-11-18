@@ -1,6 +1,3 @@
--- Script de inicialización de la base de datos relacional PostgreSQL
--- Almacenamiento inmutable para auditoría de alertas y resoluciones humanas
-
 CREATE TABLE IF NOT EXISTS operator_decision_audit (
     id BIGSERIAL PRIMARY KEY,
     alert_id VARCHAR(64) NOT NULL,
@@ -18,7 +15,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_alert_id ON operator_decision_audit (alert_
 CREATE INDEX IF NOT EXISTS idx_audit_sensor_id ON operator_decision_audit (sensor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON operator_decision_audit (recorded_at);
 
--- Registro inicial de prueba para validación de auditoría
 INSERT INTO operator_decision_audit (alert_id, sensor_id, chosen_action, operator_id, status, routing_target, delay_millis, notes, recorded_at)
 VALUES ('ALT-BOOTSTRAP-00', 'sensor_A', 'RECONOCER_Y_ESPERAR_24H', 'SYSTEM_ADMIN', 'INITIALIZED', 'delayed_actions_exchange', 10000, 'Inicialización del clúster SCADA', CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;

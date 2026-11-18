@@ -3,9 +3,6 @@ package com.empresa.mantenimiento.infrastructure.persistence.entity;
 import jakarta.persistence.*;
 import java.time.Instant;
 
-/**
- * Entidad JPA para la tabla relacional de auditoría transaccional en PostgreSQL (operator_decision_audit).
- */
 @Entity
 @Table(name = "operator_decision_audit")
 public class OperatorDecisionAuditEntity {
@@ -42,7 +39,6 @@ public class OperatorDecisionAuditEntity {
     private Instant recordedAt;
 
     protected OperatorDecisionAuditEntity() {
-        // Constructor requerido por JPA
     }
 
     public OperatorDecisionAuditEntity(

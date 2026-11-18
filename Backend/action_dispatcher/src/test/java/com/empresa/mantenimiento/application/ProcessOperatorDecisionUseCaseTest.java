@@ -21,9 +21,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-/**
- * Pruebas unitarias aisladas con Mockito para la capa de Aplicación (Use Case).
- */
 @ExtendWith(MockitoExtension.class)
 class ProcessOperatorDecisionUseCaseTest {
 
@@ -43,7 +40,6 @@ class ProcessOperatorDecisionUseCaseTest {
     @Test
     @DisplayName("Debe despachar ShutdownCommand y registrar auditoría cuando el operador elige APAGADO_INMEDIATO")
     void shouldDispatchShutdownAndAudit() {
-        // Arrange
         when(auditRepositoryPort.recordAudit(any(MaintenanceDecision.class))).thenReturn(101L);
         OperatorDecisionRecord record = new OperatorDecisionRecord(
                 new AlertId("ALT-100"),
@@ -54,10 +50,8 @@ class ProcessOperatorDecisionUseCaseTest {
                 "Vibración crítica > 90"
         );
 
-        // Act
         DecisionResultDto result = useCase.execute(record);
 
-        // Assert
         ArgumentCaptor<ShutdownCommand> cmdCaptor = ArgumentCaptor.forClass(ShutdownCommand.class);
         verify(auditRepositoryPort, times(1)).recordAudit(any(MaintenanceDecision.class));
         verify(commandPublisherPort, times(1)).dispatchShutdown(cmdCaptor.capture());
@@ -70,7 +64,6 @@ class ProcessOperatorDecisionUseCaseTest {
     @Test
     @DisplayName("Debe despachar MaintenanceWorkOrder diferido con x-delay cuando elige RECONOCER_Y_ESPERAR_24H")
     void shouldDispatchDelayedMaintenanceWorkOrder() {
-        // Arrange
         when(auditRepositoryPort.recordAudit(any(MaintenanceDecision.class))).thenReturn(202L);
         OperatorDecisionRecord record = new OperatorDecisionRecord(
                 new AlertId("ALT-200"),
@@ -81,10 +74,8 @@ class ProcessOperatorDecisionUseCaseTest {
                 "Posponer mantenimiento 24h (simulado 10s)"
         );
 
-        // Act
         DecisionResultDto result = useCase.execute(record);
 
-        // Assert
         verify(auditRepositoryPort, times(1)).recordAudit(any(MaintenanceDecision.class));
         verify(commandPublisherPort, times(1))
                 .dispatchDelayedMaintenance(any(MaintenanceWorkOrder.class), eq(10000L));
@@ -94,7 +85,6 @@ class ProcessOperatorDecisionUseCaseTest {
     @Test
     @DisplayName("Fiabilidad Transaccional: Si falla el guardado en PostgreSQL, NUNCA publica el comando en RabbitMQ")
     void shouldNotPublishToRabbitMqWhenDatabaseAuditFails() {
-        // Arrange
         when(auditRepositoryPort.recordAudit(any(MaintenanceDecision.class)))
                 .thenThrow(new IllegalStateException("PostgreSQL connection error"));
         OperatorDecisionRecord record = new OperatorDecisionRecord(
@@ -106,7 +96,6 @@ class ProcessOperatorDecisionUseCaseTest {
                 "Falla simulada de base de datos"
         );
 
-        // Act & Assert
         assertThatThrownBy(() -> useCase.execute(record))
                 .isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(commandPublisherPort);

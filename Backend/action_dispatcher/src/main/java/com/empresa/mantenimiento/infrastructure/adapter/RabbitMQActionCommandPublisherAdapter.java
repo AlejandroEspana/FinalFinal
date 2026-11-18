@@ -17,10 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * Adaptador de salida RabbitMQ que implementa el despacho de comandos críticos,
- * mantenimiento inmediato y mantenimiento diferido con plugin x-delayed-message.
- */
 @Component
 public class RabbitMQActionCommandPublisherAdapter implements ActionCommandPublisherPort {
 

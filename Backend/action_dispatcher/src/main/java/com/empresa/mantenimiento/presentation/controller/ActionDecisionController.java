@@ -18,10 +18,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * Controlador REST protegido por Spring Security (ROLE_OPERATOR) para procesar
- * decisiones humanas, consultar la auditoría en PostgreSQL y despachar notificaciones.
- */
 @RestController
 public class ActionDecisionController {
 

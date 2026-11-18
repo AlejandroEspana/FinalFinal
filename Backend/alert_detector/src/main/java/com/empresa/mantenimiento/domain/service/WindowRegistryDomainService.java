@@ -8,9 +8,6 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-/**
- * Servicio de Dominio Puro (sin anotaciones de Spring) que administra las ventanas móviles por sensor.
- */
 public class WindowRegistryDomainService {
 
     private final ConcurrentMap<SensorId, SensorVibrationWindow> windows = new ConcurrentHashMap<>();

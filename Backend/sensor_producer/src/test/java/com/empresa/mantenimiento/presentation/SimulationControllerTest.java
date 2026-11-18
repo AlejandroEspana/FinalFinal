@@ -34,7 +34,6 @@ class SimulationControllerTest {
     @Test
     @DisplayName("Debe inyectar lectura manual y retornar ApiResponse exitoso")
     void shouldInjectReadingSuccessfully() {
-        // Arrange
         SimulationController controller = new SimulationController(
                 generateBatchUseCase, injectCustomReadingUseCase, new SimulationPresentationMapper()
         );
@@ -42,10 +41,8 @@ class SimulationControllerTest {
         TelemetryEventDto dto = new TelemetryEventDto("sensor_A", 96.0, "Sector #1", 5L, Instant.now());
         when(injectCustomReadingUseCase.execute("sensor_A", 96.0)).thenReturn(dto);
 
-        // Act
         var response = controller.injectReading(req);
 
-        // Assert
         verify(injectCustomReadingUseCase).execute("sensor_A", 96.0);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().success()).isTrue();
@@ -55,7 +52,6 @@ class SimulationControllerTest {
     @Test
     @DisplayName("Contrato JSON: Deserializa tanto vibrationValue como alias vibration, burstCount y campos extra sin error 400")
     void shouldDeserializeFlexibleJsonPayloadAndExecuteBurst() throws Exception {
-        // Arrange
         ObjectMapper mapper = new BeanConfig().objectMapper();
         String frontendJson = """
                 {
@@ -76,10 +72,8 @@ class SimulationControllerTest {
         TelemetryEventDto dto = new TelemetryEventDto("sensor_B", 82.5, "Sector #2", 3L, Instant.now());
         when(injectCustomReadingUseCase.execute("sensor_B", 82.5)).thenReturn(dto);
 
-        // Act
         controller.injectReading(parsed);
 
-        // Assert
         verify(injectCustomReadingUseCase, times(3)).execute("sensor_B", 82.5);
     }
 }

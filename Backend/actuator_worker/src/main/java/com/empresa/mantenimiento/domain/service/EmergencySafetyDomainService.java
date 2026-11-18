@@ -2,9 +2,6 @@ package com.empresa.mantenimiento.domain.service;
 
 import com.empresa.mantenimiento.domain.model.ActuatorExecutionRecord;
 
-/**
- * Servicio de Dominio Puro (sin dependencias de Spring) que formatea el registro de seguridad física.
- */
 public class EmergencySafetyDomainService {
 
     public String formatPhysicalConsoleBanner(ActuatorExecutionRecord record) {

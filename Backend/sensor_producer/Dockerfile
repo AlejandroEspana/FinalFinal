@@ -1,33 +1,22 @@
-# =========================================================================
-# Etapa 1: Compilación / Builder (Maven + OpenJDK 17 Alpine)
-# =========================================================================
 FROM maven:3.9.6-eclipse-temurin-17-alpine AS builder
 
 WORKDIR /app
 
-# Optimización de caché de capas: copiar pom.xml y descargar dependencias offline
 COPY pom.xml .
 RUN mvn dependency:go-offline -B
 
-# Transferir código fuente y empaquetar omitiendo pruebas
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-# =========================================================================
-# Etapa 2: Ejecución Ligera / Runtime (Temurin JRE 17 Alpine)
-# =========================================================================
 FROM eclipse-temurin:17-jre-alpine AS runtime
 
-# Principio de menor privilegio: usuario y grupo no privilegiados
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
 
-# Copia exclusiva del artefacto .jar compilado
 COPY --from=builder /app/target/*.jar app.jar
 RUN chown -R appuser:appgroup /app
 
-# Configuración ergonómica de la JVM adaptada a contenedores
 ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
 USER appuser

@@ -6,10 +6,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 
-/**
- * Entidad de Dominio Rico que agrupa estado y comportamiento de una resolución humana.
- * Protege invariantes mediante el método semántico aplicarAccion().
- */
 public class MaintenanceDecision {
 
     public static final String ACTION_SHUTDOWN_NOW = "APAGADO_INMEDIATO";
@@ -40,9 +36,6 @@ public class MaintenanceDecision {
         this.delayMillis = 0L;
     }
 
-    /**
-     * Método semántico de negocio: aplica la decisión y determina el enrutamiento y retraso.
-     */
     public synchronized void aplicarAccion(long configuredDelayMillis) {
         switch (decisionRecord.chosenAction()) {
             case ACTION_SHUTDOWN_NOW -> {

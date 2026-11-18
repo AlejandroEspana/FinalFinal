@@ -52,7 +52,6 @@ class RabbitMQHumanAlertPublisherAdapterTest {
         String json = payloadCaptor.getValue();
         JsonNode root = mapper.readTree(json);
 
-        // Verifica contrato JSON exacto para el Frontend (texto plano, nunca {"value": ...})
         assertThat(root.get("alertId").isTextual()).isTrue();
         assertThat(root.get("alertId").asText()).isEqualTo("ALT-99");
         assertThat(root.get("sensorId").isTextual()).isTrue();

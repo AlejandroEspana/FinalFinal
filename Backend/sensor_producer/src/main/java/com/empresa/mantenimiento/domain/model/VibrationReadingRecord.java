@@ -6,10 +6,6 @@ import java.io.Serializable;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Value Object inmutable (Record) para lecturas de telemetría de vibración.
- * Incorpora validaciones Fail-Fast en su constructor compacto.
- */
 public record VibrationReadingRecord(
         SensorId sensorId,
         double vibrationValue,

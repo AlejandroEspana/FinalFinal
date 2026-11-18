@@ -35,15 +35,12 @@ class ActuatorStatusControllerTest {
     @Test
     @DisplayName("Debe retornar historial de ejecuciones físicas en GET /api/v1/actuators/history")
     void shouldReturnExecutionHistory() {
-        // Arrange
         when(orchestrationService.getExecutionHistory()).thenReturn(List.of(
                 new ActuatorExecutionDto("CMD-1", "sensor_A", "RUNNING", "EMERGENCY_HALTED", "operator", "Crítico", Instant.now())
         ));
 
-        // Act
         ResponseEntity<List<ActuatorStatusResponse>> response = controller.getExecutionHistory();
 
-        // Assert
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(response.getBody()).hasSize(1);
         assertThat(response.getBody().get(0).currentState()).isEqualTo("EMERGENCY_HALTED");

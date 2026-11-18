@@ -24,9 +24,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-/**
- * Pruebas unitarias aisladas para el Adaptador de Persistencia Relacional en PostgreSQL.
- */
 @ExtendWith(MockitoExtension.class)
 class JpaDecisionAuditRepositoryAdapterTest {
 
@@ -43,7 +40,6 @@ class JpaDecisionAuditRepositoryAdapterTest {
     @Test
     @DisplayName("Debe mapear MaintenanceDecision a OperatorDecisionAuditEntity y persistir en PostgreSQL")
     void shouldPersistDecisionAuditInPostgreSql() {
-        // Arrange
         OperatorDecisionRecord record = new OperatorDecisionRecord(
                 new AlertId("ALT-PG-01"),
                 new SensorId("sensor_A"),
@@ -68,10 +64,8 @@ class JpaDecisionAuditRepositoryAdapterTest {
         );
         when(jpaRepository.save(any(OperatorDecisionAuditEntity.class))).thenReturn(savedEntity);
 
-        // Act
         Long id = adapter.recordAudit(decision);
 
-        // Assert
         ArgumentCaptor<OperatorDecisionAuditEntity> captor = ArgumentCaptor.forClass(OperatorDecisionAuditEntity.class);
         verify(jpaRepository, times(1)).save(captor.capture());
         assertThat(captor.getValue().getAlertId()).isEqualTo("ALT-PG-01");
@@ -84,7 +78,6 @@ class JpaDecisionAuditRepositoryAdapterTest {
     @Test
     @DisplayName("Debe consultar historial de auditoría filtrado por sensorId desde PostgreSQL")
     void shouldFindAuditHistoryBySensorId() {
-        // Arrange
         OperatorDecisionAuditEntity entity = new OperatorDecisionAuditEntity(
                 "ALT-PG-02",
                 "sensor_B",
@@ -98,10 +91,8 @@ class JpaDecisionAuditRepositoryAdapterTest {
         );
         when(jpaRepository.findBySensorIdOrderByRecordedAtDesc("sensor_B")).thenReturn(List.of(entity));
 
-        // Act
         List<AuditRecordDto> history = adapter.findBySensorId("sensor_B");
 
-        // Assert
         assertThat(history).hasSize(1);
         assertThat(history.get(0).sensorId()).isEqualTo("sensor_B");
         assertThat(history.get(0).delayMillis()).isEqualTo(10000L);

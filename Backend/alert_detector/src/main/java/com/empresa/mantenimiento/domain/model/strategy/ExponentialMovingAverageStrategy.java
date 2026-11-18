@@ -5,9 +5,6 @@ import com.empresa.mantenimiento.domain.model.VibrationReadingRecord;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Estrategia alternativa basada en Promedio Ponderado Exponencial (EMA).
- */
 public final class ExponentialMovingAverageStrategy implements AnomalyDetectionStrategy {
 
     private final double alpha;

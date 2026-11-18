@@ -12,15 +12,11 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * Pruebas unitarias aisladas de Dominio Rico para MaintenanceExecutionTicket.
- */
 class MaintenanceExecutionTicketTest {
 
     @Test
     @DisplayName("Debe completar orden de mantenimiento diferida reflejando el x-delay en el resumen")
     void shouldCompleteDelayedWorkOrder() {
-        // Arrange
         MaintenanceWorkOrder wo = new MaintenanceWorkOrder(
                 "WO-DELAYED-1",
                 new SensorId("sensor_B"),
@@ -32,10 +28,8 @@ class MaintenanceExecutionTicketTest {
         );
         MaintenanceExecutionTicket ticket = new MaintenanceExecutionTicket(wo);
 
-        // Act
         ticket.completarOrdenTecnica();
 
-        // Assert
         assertThat(ticket.getTicketStatus()).isEqualTo("COMPLETED");
         assertThat(ticket.getExecutionSummary()).contains("DIFERIDO").contains("10000 ms");
         assertThat(ticket.getCompletedAt()).isNotNull();

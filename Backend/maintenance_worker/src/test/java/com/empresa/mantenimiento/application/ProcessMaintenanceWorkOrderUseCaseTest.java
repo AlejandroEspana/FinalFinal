@@ -37,7 +37,6 @@ class ProcessMaintenanceWorkOrderUseCaseTest {
     @Test
     @DisplayName("Debe procesar orden de mantenimiento y persistir ticket en el puerto")
     void shouldProcessWorkOrderAndSaveTicket() {
-        // Arrange
         MaintenanceWorkOrder wo = new MaintenanceWorkOrder(
                 "WO-IMM-10",
                 new SensorId("sensor_C"),
@@ -48,10 +47,8 @@ class ProcessMaintenanceWorkOrderUseCaseTest {
                 Instant.now()
         );
 
-        // Act
         MaintenanceTicketDto dto = useCase.execute(wo);
 
-        // Assert
         verify(repositoryPort, times(1)).saveTicket(any(MaintenanceExecutionTicket.class));
         assertThat(dto.ticketStatus()).isEqualTo("COMPLETED");
         assertThat(dto.executionSummary()).contains("INMEDIATO");

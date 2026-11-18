@@ -14,10 +14,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * Agregado de Dominio Rico: Modela la ventana móvil de lecturas y estado de un sensor.
- * Protege invariantes mediante métodos semánticos (registrarLectura, evaluarCriticidad, procesarTelemetria).
- */
 public class SensorVibrationWindow implements Serializable {
 
     public static final int DEFAULT_WINDOW_CAPACITY = 10;

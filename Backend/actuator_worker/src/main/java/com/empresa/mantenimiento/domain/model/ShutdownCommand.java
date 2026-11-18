@@ -5,9 +5,6 @@ import com.empresa.mantenimiento.domain.exception.InvalidActuatorCommandExceptio
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Value Object inmutable (Java Record con validación Fail-Fast) para comando de apagado crítico.
- */
 public record ShutdownCommand(
         String commandId,
         SensorId sensorId,

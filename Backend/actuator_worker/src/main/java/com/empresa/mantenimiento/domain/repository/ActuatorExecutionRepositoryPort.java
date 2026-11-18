@@ -6,9 +6,6 @@ import com.empresa.mantenimiento.domain.model.SensorId;
 
 import java.util.List;
 
-/**
- * Puerto de Dominio (DIP) para gestionar actuadores físicos e historial de ejecuciones.
- */
 public interface ActuatorExecutionRepositoryPort {
 
     PhysicalActuator getOrCreateActuator(SensorId sensorId);

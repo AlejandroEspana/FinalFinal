@@ -5,9 +5,6 @@ import com.empresa.mantenimiento.domain.exception.InvalidWorkOrderException;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Value Object inmutable (Java Record con validación Fail-Fast) para orden de mantenimiento.
- */
 public record MaintenanceWorkOrder(
         String workOrderId,
         SensorId sensorId,

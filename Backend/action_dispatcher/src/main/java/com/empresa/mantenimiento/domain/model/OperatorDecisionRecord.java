@@ -4,9 +4,6 @@ import java.io.Serializable;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Value Object (Record) que modela el contrato inmutable de una decisión de operador.
- */
 public record OperatorDecisionRecord(
         AlertId alertId,
         SensorId sensorId,

@@ -37,7 +37,6 @@ class ExecuteEmergencyShutdownUseCaseTest {
     @Test
     @DisplayName("Debe ejecutar corte de energía y guardar registro de ejecución")
     void shouldExecuteEmergencyShutdownAndSaveRecord() {
-        // Arrange
         SensorId sensorId = new SensorId("sensor_A");
         when(repositoryPort.getOrCreateActuator(sensorId)).thenReturn(new PhysicalActuator(sensorId));
         ShutdownCommand command = new ShutdownCommand(
@@ -48,10 +47,8 @@ class ExecuteEmergencyShutdownUseCaseTest {
                 Instant.now()
         );
 
-        // Act
         ActuatorExecutionDto dto = useCase.execute(command);
 
-        // Assert
         verify(repositoryPort, times(1)).saveExecutionRecord(any(ActuatorExecutionRecord.class));
         assertThat(dto.currentState()).isEqualTo("EMERGENCY_HALTED");
         assertThat(dto.sensorId()).isEqualTo("sensor_A");

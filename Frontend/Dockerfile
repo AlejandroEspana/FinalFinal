@@ -1,6 +1,3 @@
-# =============================================================================
-# Etapa 1: Compilación de la SPA React 18 + TypeScript + Vite + TailwindCSS
-# =============================================================================
 FROM node:20-alpine AS builder
 WORKDIR /app
 
@@ -12,9 +9,6 @@ COPY src ./src
 
 RUN npm run build && cp dist/index.html dist/dashboard.html
 
-# =============================================================================
-# Etapa 2: Servidor Ligero Nginx Alpine con TLS 1.2/1.3, DNS Resolver y Proxy
-# =============================================================================
 FROM nginx:1.27-alpine
 RUN apk add --no-cache openssl && \
     mkdir -p /etc/nginx/ssl && \

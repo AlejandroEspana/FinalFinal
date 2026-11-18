@@ -34,7 +34,6 @@ class RabbitMQMaintenanceConsumerAdapterTest {
     @Test
     @DisplayName("Debe deserializar mensaje diferido de maintenance_queue e invocar processWorkOrder")
     void shouldDeserializeDelayedMaintenanceMessage() {
-        // Arrange
         String json = """
                 {
                   "workOrderId": "WO-DELAYED-88",
@@ -47,10 +46,8 @@ class RabbitMQMaintenanceConsumerAdapterTest {
                 }
                 """;
 
-        // Act
         consumerAdapter.onMaintenanceWorkOrderMessage(json);
 
-        // Assert
         ArgumentCaptor<MaintenanceWorkOrder> captor = ArgumentCaptor.forClass(MaintenanceWorkOrder.class);
         verify(orchestrationService, times(1)).processWorkOrder(captor.capture());
         assertThat(captor.getValue().workOrderId()).isEqualTo("WO-DELAYED-88");

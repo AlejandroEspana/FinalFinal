@@ -3,11 +3,6 @@ package com.empresa.mantenimiento.domain.model;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Entidad de Dominio Rico que representa el estado materializado de un sensor en la planta.
- * Protege invariantes mediante métodos semánticos (aplicarTelemetria, aplicarAlerta,
- * detenerPorEmergencia, normalizarEstado).
- */
 public class SensorPlantStatusView {
 
     public static final int SAFE_READINGS_FOR_AUTO_RECOVERY = 4;

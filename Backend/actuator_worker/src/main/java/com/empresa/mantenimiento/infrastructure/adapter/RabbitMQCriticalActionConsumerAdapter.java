@@ -14,9 +14,6 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.Objects;
 
-/**
- * Adaptador de Entrada RabbitMQ que consume comandos de parada crítica desde critical_actions_queue.
- */
 @Component
 public class RabbitMQCriticalActionConsumerAdapter {
 

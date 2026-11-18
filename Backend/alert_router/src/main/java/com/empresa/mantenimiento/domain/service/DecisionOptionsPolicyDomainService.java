@@ -5,12 +5,6 @@ import com.empresa.mantenimiento.domain.model.AlertSeverity;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Servicio de Dominio Puro (sin dependencias de Spring) que determina polimórficamente
- * las opciones de decisión según la severidad:
- * - Si es Crítica: ["APAGADO_INMEDIATO", "IGNORAR_10_MINUTOS"]
- * - Si es Advertencia: ["PROGRAMAR_MANTENIMIENTO_AHORA", "RECONOCER_Y_ESPERAR_24H"]
- */
 public class DecisionOptionsPolicyDomainService {
 
     public static final String ACTION_SHUTDOWN_NOW = "APAGADO_INMEDIATO";

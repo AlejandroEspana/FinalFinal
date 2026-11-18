@@ -12,9 +12,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
-/**
- * Caso de Uso: Ejecuta el comando de apagado crítico aplicando el Modelo de Dominio Rico.
- */
 @Component
 public class ExecuteEmergencyShutdownUseCase {
 

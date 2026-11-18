@@ -13,9 +13,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
-/**
- * Adaptador Kafka de salida que publica en alerts_critical o alerts_warning.
- */
 @Component
 public class KafkaAlertPublisherAdapter implements AlertPublisherPort {
 
