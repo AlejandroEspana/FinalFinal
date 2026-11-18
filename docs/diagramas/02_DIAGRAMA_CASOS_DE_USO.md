@@ -1,83 +1,112 @@
-# Diagrama de Casos de Uso UML — Plataforma de Mantenimiento Predictivo Interactivo
+# 02. Diagramas de Casos de Uso UML — Plataforma de Mantenimiento Predictivo Interactivo
 
-Este documento detalla los **Actores** y **Casos de Uso** de la plataforma distribuida de Mantenimiento Predictivo Industrial desplegada en **AWS EC2**, abarcando tanto la operación humana en el **Gemelo Digital 3D** como los procesos autónomos de analítica en tiempo real y notificación en la nube con **Amazon SNS**.
+Para presentar con claridad todas las capacidades del sistema, los **Casos de Uso** se dividen en **3 Subsistemas Funcionales** según los actores que intervienen, acompañados de su matriz de trazabilidad hacia los microservicios.
 
 ---
 
-## 1. Diagrama de Casos de Uso (Mermaid)
+## 1. Subsistema A: Monitoreo en Tiempo Real, Gemelo Digital 3D y Simulación (Apache Kafka)
 
 ```mermaid
 flowchart LR
-    %% Actores
     OP(["👷 Operador de Planta\n(ROLE_OPERATOR)"])
-    ADM(["🛡️ Ingeniero / Administrador\n(ROLE_ADMIN)"])
-    IOT(["📡 Sensores Industriales / PLC\n(Simulador & Telemetría)"])
-    SNS(["☁️ Amazon SNS & AWS S3\n(Infraestructura Cloud)"])
+    SIM(["📡 Simulador PLC / Sensores\n(sensor_producer)"])
 
-    subgraph SCADA["Plataforma Distribuida de Mantenimiento Predictivo (SCADA IoT & Gemelo 3D)"]
+    subgraph SUB_MONITOREO["Subsistema 1: Telemetría Stateful y Gemelo Digital 3D"]
         direction TB
-        UC1("UC-01: Monitorear Telemetría en Tiempo Real\n(Tarjetas SCADA & WebSockets STOMP)")
-        UC2("UC-02: Inspeccionar Gemelo Digital 3D del Edificio\n(Rotación 360°, Vista por Niveles 1-3)")
-        UC3("UC-03: Inyectar Perturbación o Ráfaga de Prueba\n(Pico >90 mm/s o Ráfaga 3x >75 mm/s)")
-        UC4("UC-04: Pausar / Reanudar Generación Automática\nde Telemetría (Ciclo 12s)")
-        UC5("UC-05: Evaluar Alerta Activa y Autorizar\nAcción Correctiva (Consola de Decisiones)")
-        UC6("UC-06: Ejecutar Parada de Emergencia Inmediata\n(Corte de Energía en Actuator Worker)")
-        UC7("UC-07: Programar Orden de Mantenimiento\nInmediata o Diferida (RabbitMQ x-delay)")
-        UC8("UC-08: Reactivar Máquina Detenida y\nRestablecer Ventana Stateful")
-        UC9("UC-09: Consultar y Exportar Acta Histórica\nde Auditoría ACID (PostgreSQL CSV)")
-        UC10("UC-10: Emitir Boletín Técnico ISO 10816-3\nvía Amazon SNS (Correo Institucional)")
-        UC11("UC-11: Ejecutar Respaldo Criptográfico SHA-256\ny Replicar en Amazon S3 + CloudWatch")
+        UC01("UC-01: Visualizar Gemelo Digital 3D del Edificio\n(Rotación 360°, Vista Expandida por Niveles 1-3)")
+        UC02("UC-02: Monitorear Vibración RMS en Tiempo Real\n(10 Sensores vía WebSockets STOMP)")
+        UC03("UC-03: Inyectar Falla Crítica (>90 mm/s) o\nRáfaga de Advertencia (3x >75 mm/s)")
+        UC04("UC-04: Pausar / Reanudar Simulación Automática\nde Planta (Ciclo Realista de 12s)")
+        UC05("UC-05: Evaluar Ventana Móvil Stateful y\nTransición de Estado (Patrones State + Strategy)")
     end
 
-    %% Relaciones de Actores
-    IOT --> UC1
-    IOT --> UC3
-
-    OP --> UC1
-    OP --> UC2
-    OP --> UC3
-    OP --> UC4
-    OP --> UC5
-    OP --> UC8
-    OP --> UC9
-    OP --> UC10
-
-    ADM --> UC5
-    ADM --> UC8
-    ADM --> UC9
-    ADM --> UC10
-    ADM --> UC11
-
-    %% Relaciones Include / Extend internas
-    UC5 -.->|"<<include>>"| UC9
-    UC5 -.->|"<<include>>"| UC10
-    UC5 -.->|"<<extend: APAGADO_INMEDIATO>>"| UC6
-    UC5 -.->|"<<extend: MANTENIMIENTO>>"| UC7
-
-    UC10 --> SNS
-    UC11 --> SNS
+    SIM --> UC02
+    SIM --> UC05
+    OP --> UC01
+    OP --> UC02
+    OP --> UC03
+    OP --> UC04
+    UC03 -.->|"<<triggers>>"| UC05
 ```
 
 ---
 
-## 2. Especificación Detallada de Casos de Uso Principales
+## 2. Subsistema B: Toma de Decisiones, Enrutamiento Diferido y Actuación (RabbitMQ)
 
-### UC-02: Inspeccionar Gemelo Digital 3D del Edificio Industrial
-* **Actor Principal**: Operador de Planta (`ROLE_OPERATOR`) / Ingeniero de Confiabilidad (`ROLE_ADMIN`).
-* **Precondiciones**: El servicio `plant_monitor_backend` está activo consumiendo el tópico `sensor_data` de Apache Kafka.
-* **Flujo Principal**:
-  1. El operador visualiza el edificio industrial de 3 niveles con sus 10 sensores distribuidos espacialmente (`sensor_A` a `sensor_J`).
-  2. El operador rota el edificio en 360°, aplica zoom o activa la **Vista Expandida de Pisos 3D**.
-  3. Cuando un sensor supera los umbrales de la norma ISO 10816-3 (`> 75 mm/s` por 3 lecturas o `> 90 mm/s`), el piso correspondiente se ilumina en ámbar o rojo y el nodo 3D emite ondas de choque y un haz vertical de alerta.
-  4. El operador selecciona el nodo en el modelo 3D para abrir su **Inspector de Activo** con diagnóstico en vivo.
+```mermaid
+flowchart LR
+    OP(["👷 Operador de Planta\n(ROLE_OPERATOR)"])
+    ADM(["🛡️ Administrador / Ingeniero\n(ROLE_ADMIN)"])
 
-### UC-05: Evaluar Alerta Activa y Autorizar Acción Correctiva
-* **Actor Principal**: Operador de Planta autenticado (`operator` o `admin`).
-* **Precondiciones**: Existe una alerta pendiente en `operator_console_backend` proveniente del Fanout Exchange `human_alerts` de RabbitMQ.
-* **Flujo Principal**:
-  1. El operador revisa la alerta en la consola derecha junto con las opciones dinámicas generadas por `alert_router`.
-  2. El operador ingresa una observación técnica para el acta y selecciona una maniobra (`APAGADO_INMEDIATO`, `PROGRAMAR_MANTENIMIENTO_AHORA`, `RECONOCER_Y_ESPERAR_24H` o `IGNORAR_10_MINUTOS`).
-  3. `action_dispatcher` valida las credenciales vía HTTP Basic Auth y extrae el usuario autenticado desde el `Principal` de Spring Security (impidiendo suplantación de identidad).
-  4. Se persiste el registro inmutable en la tabla `operator_decision_audit` de PostgreSQL dentro de una transacción ACID.
-  5. Una vez confirmado el `COMMIT` en PostgreSQL (`afterCommit`), `action_dispatcher` publica el comando en RabbitMQ (`immediate_actions_exchange` o `delayed_actions_exchange` con cabecera `x-delay: 10000`) y despacha el **Boletín Corporativo ISO 10816-3** vía **Amazon SNS**.
-  6. La alerta resuelta se elimina automáticamente de la consola de alertas pendientes.
+    subgraph SUB_DECISIONES["Subsistema 2: Flujo de Decisiones Humanas y Workers Concurrentes"]
+        direction TB
+        UC06("UC-06: Recibir Alerta con Opciones Dinámicas\n(Fanout Exchange human_alerts)")
+        UC07("UC-07: Autorizar Parada de Emergencia Inmediata\n(APAGADO_INMEDIATO -> critical_actions_queue)")
+        UC08("UC-08: Programar Orden de Mantenimiento Inmediata\n(PROGRAMAR_MANTENIMIENTO_AHORA -> maintenance_queue)")
+        UC09("UC-09: Programar Orden Diferida con Retardo\n(RECONOCER_Y_ESPERAR_24H -> RabbitMQ x-delay)")
+        UC10("UC-10: Ignorar Temporalmente Alerta de Bajo Riesgo\n(IGNORAR_10_MINUTOS)")
+        UC11("UC-11: Reactivar Máquina Detenida y Normalizar\nEstado en Detector, Actuador y Planta")
+    end
+
+    OP --> UC06
+    OP --> UC07
+    OP --> UC08
+    OP --> UC09
+    OP --> UC10
+    OP --> UC11
+
+    ADM --> UC07
+    ADM --> UC08
+    ADM --> UC09
+    ADM --> UC11
+```
+
+---
+
+## 3. Subsistema C: Auditoría Transaccional ACID, Seguridad OS y Servicios AWS Cloud
+
+```mermaid
+flowchart LR
+    OP(["👷 Operador / Ingeniero\nAutenticado"])
+    CRON(["⚙️ Demonios Systemd / Cron\n(Ubuntu Server 24.04 LTS)"])
+    AWS(["☁️ Servicios Nativos AWS\n(SNS, S3, CloudWatch, ACM)"])
+
+    subgraph SUB_AUDITORIA["Subsistema 3: Persistencia ACID, Notificación ISO 10816-3 y Resiliencia Cloud"]
+        direction TB
+        UC12("UC-12: Registrar Acta Inmutable en PostgreSQL\n(Tabla operator_decision_audit con Principal Auth)")
+        UC13("UC-13: Filtrar y Exportar Histórico de Auditoría\nen Formato CSV Corporativo")
+        UC14("UC-14: Despachar Boletín Técnico ISO 10816-3\nvía Amazon SNS (Correo Institucional & SMS)")
+        UC15("UC-15: Ejecutar Backup Diario de PostgreSQL\ncon Firma SHA-256 y Réplica Cifrada en AWS S3")
+        UC16("UC-16: Publicar Métricas de RAM, Swap, Disco\ny Contenedores hacia AWS CloudWatch")
+        UC17("UC-17: Sincronizar y Desplegar Automáticamente\nNuevos Commits desde la Rama main de GitHub")
+    end
+
+    OP --> UC12
+    OP --> UC13
+    OP --> UC14
+
+    CRON --> UC15
+    CRON --> UC16
+    CRON --> UC17
+
+    UC14 --> AWS
+    UC15 --> AWS
+    UC16 --> AWS
+```
+
+---
+
+## 4. Matriz de Trazabilidad de Casos de Uso vs. Microservicios
+
+| Código | Caso de Uso | Microservicio / Componente Responsable | Tecnología Clave |
+| :--- | :--- | :--- | :--- |
+| **UC-01 / UC-02** | Gemelo Digital 3D y Telemetría en Vivo | `frontend_dashboard` + `plant_monitor_backend` | React 18, Canvas 3D, WebSocket STOMP |
+| **UC-03 / UC-04** | Simulación Automática e Inyección de Fallas | `sensor_producer` | Apache Kafka (`sensor_data`, Key=`sensorId`) |
+| **UC-05** | Detección Stateful en Ventana Móvil | `alert_detector` | Kafka Consumer + Patrones `State` y `Strategy` |
+| **UC-06** | Generación de Opciones y Fanout | `alert_router` + `operator_console_backend` | RabbitMQ Fanout Exchange (`human_alerts`) |
+| **UC-07** | Parada de Emergencia Inmediata | `action_dispatcher` $\rightarrow$ `actuator_worker` (x2) | RabbitMQ Direct (`critical_actions_queue`) |
+| **UC-08 / UC-09** | Mantenimiento Inmediato y Diferido | `action_dispatcher` $\rightarrow$ `maintenance_worker` (x2) | Plugin `rabbitmq_delayed_message_exchange` (`x-delay`) |
+| **UC-11** | Reactivación Integral de Máquina | `plant_monitor`, `alert_detector`, `actuator_worker` | Endpoints REST de Reset Coordinado |
+| **UC-12 / UC-13** | Auditoría Transaccional Inmutable | `action_dispatcher` + `postgres` | PostgreSQL 16 ACID + Spring Security + `afterCommit` |
+| **UC-14** | Boletín Corporativo ISO 10816-3 | `action_dispatcher`, `alert_router`, `scada-sns-bridge` | Amazon SNS (`us-east-2`) + Rol IAM `IMDSv2` |
+| **UC-15 / UC-16 / UC-17** | Backups S3, CloudWatch y Auto-Deploy | Ubuntu Server 24.04 LTS (`hardening-ubuntu.sh`) | Amazon S3 (`AES256`), CloudWatch y Cron GitOps |

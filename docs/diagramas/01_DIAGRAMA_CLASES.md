@@ -1,29 +1,91 @@
-# Diagrama de Clases UML — Plataforma de Mantenimiento Predictivo Interactivo (IoT Industrial)
+# 01. Diagramas de Clases UML — Plataforma de Mantenimiento Predictivo Interactivo
 
-Este documento presenta el **Diagrama de Clases UML** de la arquitectura limpia / hexagonal implementada en los **8 microservicios en Java 17 + Spring Boot 3.3.5**, destacando:
-* **Dominio Rico y Puro** (sin dependencias de frameworks en la capa `domain`).
-* **Value Objects inmutables (`record`)** con validación en constructor compacto y serialización plana `@JsonValue` / `@JsonCreator` (`SensorId`, `AlertId`, `VibrationReadingRecord`).
-* **Patrón de Diseño State** (`SensorOperationalState`: `NormalSensorState`, `WarningSensorState`, `CriticalSensorState`) con emisión de alertas únicamente en **transición de estado**.
-* **Patrón de Diseño Strategy** (`AnomalyDetectionStrategy`: `ThresholdSlidingWindowStrategy`, `ExponentialMovingAverageStrategy`).
-* **Sincronización Transaccional Post-Commit (`TransactionSynchronizationManager`)** en `action_dispatcher` para garantizar que ningún comando salga hacia RabbitMQ sin haber sido confirmado primero en PostgreSQL.
+Para facilitar su lectura y sustentación académica, el modelo de clases UML se organiza en **4 vistas modulares** que reflejan la arquitectura limpia / hexagonal y los patrones de diseño orientados a objetos aplicados en los **8 microservicios Java 17 + Spring Boot 3.3.5**.
 
 ---
 
-## 1. Diagrama de Clases General (Mermaid UML)
+## Vista 1.1: Estructura Hexagonal Uniforme en los 8 Microservicios
+
+Todos los microservicios respetan una separación estricta en **4 capas**, donde la capa `domain` es **100% Java puro** (sin anotaciones `@Service` ni dependencias de Spring, Kafka, RabbitMQ o JPA) y todas las dependencias se inyectan por constructor validando nulidad con `Objects.requireNonNull(...)`.
+
+```mermaid
+classDiagram
+    direction LR
+
+    namespace Capa_Presentation {
+        class RestControllerAdapter {
+            <<@RestController>>
+            -UseCasePort useCase
+            +handleHttpRequest(RequestDto) ResponseEntity
+        }
+        class GlobalExceptionHandler {
+            <<@RestControllerAdvice>>
+            +handleDomainException(IllegalArgumentException) ApiErrorResponse
+        }
+    }
+
+    namespace Capa_Application {
+        class UseCaseService {
+            <<Application Service>>
+            -DomainRepositoryPort outputPort
+            -DomainService pureDomainService
+            +execute(CommandDto) ResultDto
+        }
+    }
+
+    namespace Capa_Domain_Puro {
+        class AggregateRootEntity {
+            <<Rich Domain Entity>>
+            -ValueObjectId id
+            +executeBusinessBehavior() DomainEvent
+        }
+        class DomainService {
+            <<Pure Java Domain Service>>
+            +evaluateBusinessRule(AggregateRootEntity) boolean
+        }
+        class DomainRepositoryPort {
+            <<Interface / Output Port>>
+            +save(AggregateRootEntity) void
+        }
+    }
+
+    namespace Capa_Infrastructure {
+        class MessagingOrPersistenceAdapter {
+            <<@Component / @Repository>>
+            -ExternalClient client
+            +save(AggregateRootEntity) void
+        }
+        class DomainBeanConfig {
+            <<@Configuration>>
+            +domainServiceBean() DomainService
+        }
+    }
+
+    RestControllerAdapter --> UseCaseService : invoca caso de uso
+    UseCaseService --> DomainService : delega lógica pura
+    UseCaseService --> DomainRepositoryPort : usa puerto de salida
+    DomainService --> AggregateRootEntity : opera sobre
+    MessagingOrPersistenceAdapter ..|> DomainRepositoryPort : implementa puerto
+    DomainBeanConfig ..> DomainService : instancia sin ensuciar dominio
+```
+
+---
+
+## Vista 1.2: Dominio Rico, Value Objects y Patrones `State` + `Strategy` (`alert_detector`)
+
+Este módulo consume el flujo particionado de **Apache Kafka (`sensor_data`)**, mantiene una ventana móvil en memoria por cada sensor (`SensorStreamWindow`) y aplica:
+1. **Patrón Strategy (`AnomalyDetectionStrategy`)**: Permite evaluar umbrales de la norma ISO 10816-3 (`> 75.0 mm/s` por 3 lecturas consecutivas o `> 90.0 mm/s` inmediato) o media móvil exponencial (`EMA`).
+2. **Patrón State (`SensorOperationalState`)**: Controla las transiciones entre `NormalSensorState`, `WarningSensorState` y `CriticalSensorState`, emitiendo alertas **únicamente cuando cambia el estado** para evitar tormentas de alertas.
 
 ```mermaid
 classDiagram
     direction TB
 
-    %% =====================================================================
-    %% VALUE OBJECTS Y MODELO DE DOMINIO COMPARTIDO
-    %% =====================================================================
     class SensorId {
         <<ValueObject / Record>>
         -String value
         +SensorId(String value)
         +value() String
-        +fromString(String raw)$ SensorId
     }
 
     class AlertId {
@@ -39,15 +101,7 @@ classDiagram
         -SensorId sensorId
         -double vibrationValue
         -Instant timestamp
-        +isCritical(double threshold) boolean
-        +isWarning(double threshold) boolean
-    }
-
-    class AlertSeverity {
-        <<Enumeration>>
-        NORMAL
-        WARNING
-        CRITICAL
+        +exceedsThreshold(double limit) boolean
     }
 
     class IndustrialAlert {
@@ -58,85 +112,98 @@ classDiagram
         -double triggerValue
         -String description
         -Instant detectedAt
-        +requiresImmediateEscalation() boolean
-    }
-
-    %% =====================================================================
-    %% PATRÓN STATE (MAQUINA DE ESTADOS DEL SENSOR EN ALERT_DETECTOR)
-    %% =====================================================================
-    class SensorOperationalState {
-        <<Interface / State Pattern>>
-        +evaluateTransition(SensorStreamWindow context, double latestReading) SensorOperationalState
-        +severity() AlertSeverity
-        +stateName() String
-    }
-
-    class NormalSensorState {
-        +evaluateTransition(SensorStreamWindow context, double latestReading) SensorOperationalState
-        +severity() AlertSeverity
-        +stateName() String
-    }
-
-    class WarningSensorState {
-        +evaluateTransition(SensorStreamWindow context, double latestReading) SensorOperationalState
-        +severity() AlertSeverity
-        +stateName() String
-    }
-
-    class CriticalSensorState {
-        +evaluateTransition(SensorStreamWindow context, double latestReading) SensorOperationalState
-        +severity() AlertSeverity
-        +stateName() String
     }
 
     class SensorStreamWindow {
-        <<Aggregate Root / Stateful Window>>
+        <<Stateful Aggregate Root>>
         -SensorId sensorId
-        -Deque~VibrationReadingRecord~ slidingWindow
-        -int maxCapacity
+        -Deque~VibrationReadingRecord~ window
+        -int maxWindowSize
         -SensorOperationalState currentState
-        +appendReading(VibrationReadingRecord reading) Optional~IndustrialAlert~
-        +countConsecutiveAbove(double threshold) int
-        +calculateAverage() double
-        +resetState() void
+        +recordAndEvaluate(VibrationReadingRecord, AnomalyDetectionStrategy) Optional~IndustrialAlert~
+        +consecutiveReadingsAbove(double threshold) int
+        +resetToNormal() void
     }
 
-    SensorOperationalState <|.. NormalSensorState
-    SensorOperationalState <|.. WarningSensorState
-    SensorOperationalState <|.. CriticalSensorState
-    SensorStreamWindow *-- SensorId
-    SensorStreamWindow *-- VibrationReadingRecord
-    SensorStreamWindow --> SensorOperationalState : delega transición
+    class SensorOperationalState {
+        <<Interface / State Pattern>>
+        +nextState(AlertSeverity evaluatedSeverity) SensorOperationalState
+        +shouldEmitAlertOnTransitionTo(AlertSeverity next) boolean
+        +severity() AlertSeverity
+    }
 
-    %% =====================================================================
-    %% PATRÓN STRATEGY (ALGORITMOS DE DETECCIÓN DE ANOMALÍAS)
-    %% =====================================================================
+    class NormalSensorState {
+        +nextState(AlertSeverity evaluatedSeverity) SensorOperationalState
+        +shouldEmitAlertOnTransitionTo(AlertSeverity next) boolean
+        +severity() AlertSeverity
+    }
+
+    class WarningSensorState {
+        +nextState(AlertSeverity evaluatedSeverity) SensorOperationalState
+        +shouldEmitAlertOnTransitionTo(AlertSeverity next) boolean
+        +severity() AlertSeverity
+    }
+
+    class CriticalSensorState {
+        +nextState(AlertSeverity evaluatedSeverity) SensorOperationalState
+        +shouldEmitAlertOnTransitionTo(AlertSeverity next) boolean
+        +severity() AlertSeverity
+    }
+
     class AnomalyDetectionStrategy {
         <<Interface / Strategy Pattern>>
-        +analyze(SensorStreamWindow window, VibrationReadingRecord latest) Optional~IndustrialAlert~
+        +evaluateSeverity(SensorStreamWindow window, VibrationReadingRecord latest) AlertSeverity
     }
 
     class ThresholdSlidingWindowStrategy {
-        -double warningThreshold
-        -double criticalThreshold
-        -int consecutiveCountRequired
-        +analyze(SensorStreamWindow window, VibrationReadingRecord latest) Optional~IndustrialAlert~
+        -double warningThreshold : 75.0
+        -double criticalThreshold : 90.0
+        -int requiredConsecutiveWarnings : 3
+        +evaluateSeverity(SensorStreamWindow window, VibrationReadingRecord latest) AlertSeverity
     }
 
     class ExponentialMovingAverageStrategy {
-        -double alpha
-        -double criticalThreshold
-        +analyze(SensorStreamWindow window, VibrationReadingRecord latest) Optional~IndustrialAlert~
+        -double smoothingFactorAlpha : 0.35
+        -double criticalThreshold : 90.0
+        +evaluateSeverity(SensorStreamWindow window, VibrationReadingRecord latest) AlertSeverity
     }
 
+    SensorStreamWindow *-- SensorId
+    SensorStreamWindow *-- VibrationReadingRecord
+    SensorStreamWindow --> SensorOperationalState : estado actual
+    SensorOperationalState <|.. NormalSensorState
+    SensorOperationalState <|.. WarningSensorState
+    SensorOperationalState <|.. CriticalSensorState
+
+    SensorStreamWindow ..> AnomalyDetectionStrategy : aplica estrategia
     AnomalyDetectionStrategy <|.. ThresholdSlidingWindowStrategy
     AnomalyDetectionStrategy <|.. ExponentialMovingAverageStrategy
-    AnomalyDetectionStrategy ..> SensorStreamWindow : evalúa ventana
-    AnomalyDetectionStrategy ..> IndustrialAlert : emite en transición
+    SensorStreamWindow ..> IndustrialAlert : genera en transición
+```
 
-    %% =====================================================================
-    %% ENRUTAMIENTO HUMANO (ALERT_ROUTER & OPERATOR_CONSOLE_BACKEND)
-    %% =====================================================================
+---
+
+## Vista 1.3: Enrutamiento de Alertas y Generación de Opciones (`alert_router` & `operator_console_backend`)
+
+Consume las alertas desde los tópicos de Kafka (`alerts_warning` y `alerts_critical`), construye la solicitud de intervención humana (`HumanActionRequest`) con opciones dinámicas según la severidad y la publica en el **Fanout Exchange `human_alerts` de RabbitMQ** y hacia **Amazon SNS**.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class RouteIncomingAlertUseCase {
+        <<Application Use Case>>
+        -AlertOptionGeneratorDomainService optionGenerator
+        -HumanAlertPublisherPort publisherPort
+        +routeAlert(IndustrialAlert alert) void
+    }
+
+    class AlertOptionGeneratorDomainService {
+        <<Pure Domain Service>>
+        +generateOptionsFor(AlertSeverity severity) List~String~
+        +createHumanRequest(IndustrialAlert alert) HumanActionRequest
+    }
+
     class HumanActionRequest {
         <<Domain Entity>>
         -AlertId alertId
@@ -148,12 +215,6 @@ classDiagram
         -Instant timestamp
     }
 
-    class AlertOptionGeneratorDomainService {
-        <<Pure Domain Service>>
-        +generateOptionsFor(IndustrialAlert alert) List~String~
-        +buildHumanRequest(IndustrialAlert alert) HumanActionRequest
-    }
-
     class HumanAlertPublisherPort {
         <<Output Port>>
         +publish(HumanActionRequest request) void
@@ -162,29 +223,53 @@ classDiagram
     class RabbitMQHumanAlertPublisherAdapter {
         <<Infrastructure Adapter>>
         -RabbitTemplate rabbitTemplate
-        -HttpClient httpClient
+        -HttpClient snsHttpClient
+        -String fanoutExchangeName
         +publish(HumanActionRequest request) void
         -sendCriticalAlertToSns(HumanActionRequest request) void
     }
 
-    AlertOptionGeneratorDomainService ..> IndustrialAlert
-    AlertOptionGeneratorDomainService ..> HumanActionRequest
-    HumanAlertPublisherPort <|.. RabbitMQHumanAlertPublisherAdapter
-    HumanActionRequest *-- AlertId
-    HumanActionRequest *-- SensorId
-    HumanActionRequest *-- AlertSeverity
+    class OperatorAlertConsoleService {
+        <<operator_console_backend>>
+        -ConcurrentMap~String, HumanActionRequest~ activeAlerts
+        -SimpMessagingTemplate stompWebSocket
+        +registerIncomingAlert(HumanActionRequest req) void
+        +dismissAlert(String alertId) void
+    }
 
-    %% =====================================================================
-    %% DESPACHO TRANSACCIONAL Y AUDITORÍA ACID (ACTION_DISPATCHER)
-    %% =====================================================================
-    class ActionType {
-        <<Enumeration>>
-        APAGADO_INMEDIATO
-        IGNORAR_10_MINUTOS
-        PROGRAMAR_MANTENIMIENTO_AHORA
-        RECONOCER_Y_ESPERAR_24H
-        +isDelayed() boolean
-        +requiresActuatorShutdown() boolean
+    RouteIncomingAlertUseCase --> AlertOptionGeneratorDomainService
+    RouteIncomingAlertUseCase --> HumanAlertPublisherPort
+    AlertOptionGeneratorDomainService ..> HumanActionRequest : instancia
+    RabbitMQHumanAlertPublisherAdapter ..|> HumanAlertPublisherPort
+    RabbitMQHumanAlertPublisherAdapter ..> OperatorAlertConsoleService : vía RabbitMQ Fanout
+```
+
+---
+
+## Vista 1.4: Despacho Transaccional ACID (`afterCommit`), RabbitMQ `x-delay` y Workers (`action_dispatcher`)
+
+Garantiza que toda decisión tomada por el operador humano:
+1. Tome el `operatorId` directamente del `Principal` autenticado en **Spring Security** (impidiendo suplantación).
+2. Se guarde primero en **PostgreSQL (`operator_decision_audit`)** dentro de una transacción ACID.
+3. Solo tras confirmarse el `COMMIT` en PostgreSQL (`TransactionSynchronization.afterCommit()`), publique el comando en **RabbitMQ** (`immediate_actions_exchange` o `delayed_actions_exchange` con cabecera `x-delay`) y despache el boletín corporativo **ISO 10816-3** vía **Amazon SNS**.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class OperatorDecisionController {
+        <<@RestController>>
+        -ProcessOperatorDecisionUseCase useCase
+        +decide(OperatorDecisionRequestDto, Principal) ResponseEntity
+    }
+
+    class ProcessOperatorDecisionUseCase {
+        <<@Transactional Use Case>>
+        -DecisionRoutingDomainService routingDomainService
+        -AuditRecordRepositoryPort auditRepository
+        -ActionCommandPublisherPort commandPublisher
+        -MultichannelNotificationService snsNotifier
+        +execute(OperatorDecisionCommand, String authenticatedUser) DecisionResultDto
     }
 
     class OperatorDecision {
@@ -192,59 +277,51 @@ classDiagram
         -AlertId alertId
         -SensorId sensorId
         -ActionType chosenAction
-        -String authenticatedOperatorId
+        -String operatorId
         -String notes
         -Instant decidedAt
-        +determineRoutingTarget() String
-        +calculateDelayMillis(long configuredDelay) long
+        +requiresImmediateShutdown() boolean
+        +isDelayedMaintenance() boolean
     }
 
     class AuditRecordRepositoryPort {
         <<Output Port>>
-        +saveAuditRecord(OperatorDecision decision, String status, String target, long delayMs) Long
-        +findAllDesc() List~OperatorDecisionAuditEntity~
+        +save(OperatorDecision, String status, String target, long delayMs) Long
+    }
+
+    class JpaAuditRecordRepositoryAdapter {
+        <<PostgreSQL Adapter>>
+        -SpringDataAuditJpaRepository jpaRepo
+        +save(OperatorDecision, String status, String target, long delayMs) Long
     }
 
     class ActionCommandPublisherPort {
         <<Output Port>>
-        +publishImmediateCriticalShutdown(OperatorDecision decision, Long auditId) void
-        +publishImmediateMaintenance(OperatorDecision decision, Long auditId) void
-        +publishDelayedMaintenance(OperatorDecision decision, Long auditId, long delayMs) void
+        +publishCriticalShutdown(OperatorDecision, Long auditId) void
+        +publishImmediateMaintenance(OperatorDecision, Long auditId) void
+        +publishDelayedMaintenance(OperatorDecision, Long auditId, long delayMs) void
     }
 
-    class ProcessOperatorDecisionUseCase {
-        <<Application Use Case>>
-        -AuditRecordRepositoryPort auditRepository
-        -ActionCommandPublisherPort commandPublisher
-        -MultichannelNotificationService notificationService
-        +execute(OperatorDecisionCommand cmd, String authenticatedPrincipal) DecisionResultDto
+    class RabbitMQActionCommandPublisherAdapter {
+        <<RabbitMQ Adapter>>
+        -RabbitTemplate rabbitTemplate
+        +publishCriticalShutdown(OperatorDecision, Long auditId) void
+        +publishImmediateMaintenance(OperatorDecision, Long auditId) void
+        +publishDelayedMaintenance(OperatorDecision, Long auditId, long delayMs) void
     }
 
     class MultichannelNotificationService {
-        <<Infrastructure Service>>
-        -String targetEmail
-        -String targetPhone
+        <<Amazon SNS Adapter>>
         -String snsBridgeUrl
-        +notifyOperatorDecision(DecisionResultDto decision, String operatorId, String notes) NotificationRecordDto
-        +sendTestNotification(String customMessage) NotificationRecordDto
+        -String targetEmail
+        +notifyOperatorDecision(DecisionResultDto, String operatorId, String notes) NotificationRecordDto
     }
 
-    ProcessOperatorDecisionUseCase --> AuditRecordRepositoryPort : 1. Persiste ACID en PostgreSQL
-    ProcessOperatorDecisionUseCase --> ActionCommandPublisherPort : 2. Publica en RabbitMQ (afterCommit)
-    ProcessOperatorDecisionUseCase --> MultichannelNotificationService : 3. Emite Boletín ISO-10816 a AWS SNS
-    OperatorDecision *-- ActionType
-    OperatorDecision *-- AlertId
-    OperatorDecision *-- SensorId
+    OperatorDecisionController --> ProcessOperatorDecisionUseCase
+    ProcessOperatorDecisionUseCase --> OperatorDecision : crea y valida
+    ProcessOperatorDecisionUseCase --> AuditRecordRepositoryPort : 1. INSERT ACID en PostgreSQL
+    ProcessOperatorDecisionUseCase --> ActionCommandPublisherPort : 2. Hook afterCommit() RabbitMQ
+    ProcessOperatorDecisionUseCase --> MultichannelNotificationService : 3. Hook afterCommit() AWS SNS
+    JpaAuditRecordRepositoryAdapter ..|> AuditRecordRepositoryPort
+    RabbitMQActionCommandPublisherAdapter ..|> ActionCommandPublisherPort
 ```
-
----
-
-## 2. Descripción de Patrones y Principios POO Aplicados
-
-| Patrón / Principio POO | Clases Implicadas | Responsabilidad en el Sistema |
-| :--- | :--- | :--- |
-| **Arquitectura Hexagonal (Puertos y Adaptadores)** | `*Port` (Dominio) e `*Adapter` (Infraestructura) | Desacopla el núcleo de negocio de Kafka, RabbitMQ, PostgreSQL y Amazon SNS. |
-| **Value Objects Inmutables (`record`)** | `SensorId`, `AlertId`, `VibrationReadingRecord` | Encapsulan validación de invariantes en el constructor compacto y serialización JSON plana (`@JsonValue`). |
-| **Patrón State (Comportamiento)** | `SensorOperationalState`, `NormalSensorState`, `WarningSensorState`, `CriticalSensorState` | Modela el ciclo de vida operativo de cada sensor y evita tormentas de alertas emitiendo eventos solo cuando ocurre una transición real de estado. |
-| **Patrón Strategy (Comportamiento)** | `AnomalyDetectionStrategy`, `ThresholdSlidingWindowStrategy`, `ExponentialMovingAverageStrategy` | Permite intercambiar el algoritmo matemático de detección sobre la ventana móvil stateful de cada partición de Kafka. |
-| **Sincronización Transaccional (`afterCommit`)** | `ProcessOperatorDecisionUseCase`, `TransactionSynchronizationManager` | Garantiza consistencia entre PostgreSQL y RabbitMQ: el mensaje AMQP y el correo Amazon SNS solo se emiten cuando el `COMMIT` en PostgreSQL ha sido exitoso. |

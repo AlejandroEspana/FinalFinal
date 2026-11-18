@@ -1,122 +1,113 @@
-# Diagramas de Procesos y Secuencia — Flujo de Datos, Flujo de Decisiones y Auditoría ACID
+# 04. Diagramas de Procesos y Secuencia — Flujo de Datos, Decisiones y Auditoría
 
-Este documento presenta los **Diagramas de Procesos y Secuencia** de punta a punta de la plataforma, mostrando cómo interactúan el **Flujo de Datos Masivos (Apache Kafka)**, el **Flujo de Decisiones y Tareas Diferidas (RabbitMQ)**, la **Persistencia Transaccional (PostgreSQL)**, el **Gemelo Digital 3D** y la **Notificación Cloud (Amazon SNS + Amazon S3)**.
+Para explicar con total claridad el funcionamiento de punta a punta, los procesos se dividen en **3 secuencias especializadas** que corresponden exactamente a los objetivos de aprendizaje del caso de estudio.
 
 ---
 
-## 1. Diagrama de Secuencia E2E: Ingesta, Detección Stateful, Decisión Humana y Despacho
+## 1. Proceso A: Flujo de Datos Masivos y Detección Stateful en Apache Kafka
+
+Demuestra cómo se garantiza el **orden cronológico estricto por sensor** utilizando `sensorId` como **Key de particionamiento en Kafka** y cómo los patrones **Strategy** y **State** evitan la tormenta de alertas.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor OP as 👷 Operador SCADA (Gemelo 3D)
-    participant NGINX as 🔒 Nginx Reverse Proxy (TLS)
-    participant PROD as 📡 sensor_producer
-    participant KAFKA as ⚡ Apache Kafka (3 Particiones)
+    participant SIM as 📡 sensor_producer
+    participant K_DATA as ⚡ Kafka Topic: sensor_data (3 Particiones)
     participant PMON as 🖥️ plant_monitor_backend
-    participant DET as 🧠 alert_detector (State + Strategy)
-    participant ROUT as 🔀 alert_router
-    participant RMQ as 🐇 RabbitMQ (Fanout & x-delay)
-    participant OCON as 🚨 operator_console_backend
-    participant DISP as ⚖️ action_dispatcher (Spring Security)
-    participant PG as 🗄️ PostgreSQL 16 (ACID)
-    participant WORK as 🔧 actuator / maintenance_worker
-    participant SNS as ☁️ Amazon SNS (Email ISO-10816)
+    participant DET as 🧠 alert_detector (Ventana Móvil)
+    participant K_ALERT as ⚡ Kafka Topics: alerts_warning / alerts_critical
+    actor UI as 💻 Gemelo Digital 3D (React)
 
-    %% Fase 1: Flujo de Datos (Kafka)
-    rect rgb(245, 240, 230)
-        Note over PROD,DET: FASE 1 — FLUJO DE DATOS E INGESTA STATEFUL (APACHE KAFKA)
-        PROD->>KAFKA: Publica lectura en topic 'sensor_data' (Key = sensorId)
-        par Actualización de Gemelo 3D
-            KAFKA->>PMON: Consume lectura ordenada por partición
-            PMON-->>NGINX: Push STOMP WebSocket (/topic/plant-status)
-            NGINX-->>OP: Actualiza vibración y color del piso/nodo en Edificio 3D
-        and Evaluación en Ventana Móvil Stateful
-            KAFKA->>DET: Consume lectura en SensorStreamWindow(sensorId)
-            DET->>DET: Evalúa Strategy (>75 mm/s x3 o >90 mm/s) + State Transition
-            opt Transición de Estado (ej. NORMAL -> CRITICAL)
-                DET->>KAFKA: Publica IndustrialAlert en 'alerts_critical'
-            end
+    SIM->>K_DATA: Publica VibrationReadingRecord (Key = "sensor_A", Valor = 96.4 mm/s)
+    Note over K_DATA: Kafka asigna siempre "sensor_A" a la misma Partición (Orden Garantizado)
+
+    par Actualización Visual del Gemelo 3D
+        K_DATA->>PMON: Consume lectura ordenada
+        PMON->>UI: Envía trama STOMP (/topic/plant-status)
+        UI->>UI: Ilumina Piso 1 en Rojo + Activa onda expansiva en sensor_A
+    and Análisis Stateful en Ventana Móvil
+        K_DATA->>DET: Consume lectura en SensorStreamWindow("sensor_A")
+        DET->>DET: 1. Agrega lectura a Deque (Ventana Móvil)
+        DET->>DET: 2. Ejecuta Strategy (ThresholdSlidingWindowStrategy) -> CRITICAL
+        DET->>DET: 3. Evalúa Patrón State (NormalSensorState -> CriticalSensorState)
+        alt Ocurrió Transición de Estado (ej. NORMAL a CRITICAL)
+            DET->>K_ALERT: Publica IndustrialAlert en topic 'alerts_critical'
+        else Sigue en el mismo estado (CRITICAL -> CRITICAL)
+            DET->>DET: Suprime emisión repetida (Previene tormenta de alertas)
         end
-    end
-
-    %% Fase 2: Enrutamiento hacia el Humano (RabbitMQ Fanout + SNS)
-    rect rgb(254, 243, 199)
-        Note over KAFKA,SNS: FASE 2 — GENERACIÓN DE OPCIONES Y ALERTA AL OPERADOR (RABBITMQ FANOUT)
-        KAFKA->>ROUT: Consume alerta desde 'alerts_critical' / 'alerts_warning'
-        ROUT->>ROUT: Genera opciones dinámicas (AlertOptionGeneratorDomainService)
-        ROUT->>RMQ: Publica HumanActionRequest en Fanout Exchange 'human_alerts'
-        ROUT--)SNS: Emite Boletín de Alerta Temprana ISO-10816 (si es CRITICAL)
-        RMQ->>OCON: Entrega en cola 'human_alerts_console_queue'
-        OCON-->>NGINX: Push STOMP WebSocket (/topic/operator-alerts)
-        NGINX-->>OP: Muestra alerta activa y botones de maniobra en Consola
-    end
-
-    %% Fase 3: Decisión del Operador, Auditoría ACID y Ejecución
-    rect rgb(220, 252, 231)
-        Note over OP,SNS: FASE 3 — DECISIÓN HUMANA, AUDITORÍA ACID Y DESPACHO (OUTBOX / AFTER-COMMIT)
-        OP->>NGINX: POST /api/dispatcher/decide (Basic Auth + Acción + Notas)
-        NGINX->>DISP: Reenvía petición autenticada
-        DISP->>DISP: Extrae operatorId desde SecurityContext (Principal)
-        DISP->>PG: BEGIN TX -> INSERT INTO operator_decision_audit -> COMMIT
-        PG-->>DISP: Confirmación ACID (auditRecordId)
-
-        Note right of DISP: Hook TransactionSynchronization.afterCommit()
-        alt Acción = APAGADO_INMEDIATO
-            DISP->>RMQ: Publica en 'immediate_actions_exchange' (routingKey: critical.shutdown)
-            RMQ->>WORK: Consume en 'critical_actions_queue' (actuator_worker)
-            WORK->>WORK: Ejecuta corte de energía (EMERGENCY_HALTED)
-        else Acción = PROGRAMAR_MANTENIMIENTO_AHORA
-            DISP->>RMQ: Publica en 'immediate_actions_exchange' (routingKey: maintenance.immediate)
-            RMQ->>WORK: Consume en 'maintenance_queue' (maintenance_worker)
-            WORK->>WORK: Genera Orden de Trabajo Inmediata
-        else Acción = RECONOCER_Y_ESPERAR_24H (Diferida)
-            DISP->>RMQ: Publica en 'delayed_actions_exchange' (Header x-delay: 10000 ms)
-            Note over RMQ: Retiene mensaje en plugin x-delayed-message
-            RMQ->>WORK: Libera tras expirar x-delay hacia 'maintenance_queue'
-            WORK->>WORK: Genera Orden de Trabajo Diferida
-        end
-
-        DISP--)SNS: Emite Acta Oficial de Resolución ISO-10816 al Correo Institucional
-        DISP-->>NGINX: HTTP 200 OK (DecisionDispatchedResponseDto)
-        NGINX-->>OP: Confirma auditoría y limpia alerta de la vista
     end
 ```
 
 ---
 
-## 2. Diagrama de Proceso: Máquina de Estados del Sensor y Reglas deEnrutamiento
+## 2. Proceso B: Enrutamiento de Alertas y Generación de Opciones (`alert_router` + RabbitMQ Fanout)
+
+Demuestra el puente entre el bus analítico (**Apache Kafka**) y el bus de decisiones operativas (**RabbitMQ**), enriqueciendo la alerta con opciones de acción para el humano.
 
 ```mermaid
-flowchart TD
-    START(["📡 Nueva Lectura de Vibración\nVibrationReadingRecord (sensorId, mm/s)"]) --> WINDOW["Agregar a Ventana Móvil Stateful\nSensorStreamWindow (Últimas N lecturas)"]
+sequenceDiagram
+    autonumber
+    participant K_ALERT as ⚡ Kafka (alerts_critical / alerts_warning)
+    participant ROUT as 🔀 alert_router
+    participant FANOUT as 🐇 RabbitMQ Fanout: human_alerts
+    participant SNS as ☁️ Amazon SNS (scada-iot-alertas-ucc)
+    participant OCON as 🚨 operator_console_backend
+    actor OP as 👷 Operador en Consola SCADA
 
-    WINDOW --> CHECK_CRIT{"¿Vibración > 90.0 mm/s?"}
-    CHECK_CRIT -->|"Sí"| TRANS_CRIT{"¿Estado actual != CRITICAL?"}
-    TRANS_CRIT -->|"Sí (Transición)"| EMIT_CRIT["Cambiar a CriticalSensorState\nEmitir Alerta en 'alerts_critical'"]
-    TRANS_CRIT -->|"No (Ya estaba en CRITICAL)"| SUPPRESS["Suprimir emisión duplicada\n(Evita tormenta de alertas)"]
+    K_ALERT->>ROUT: Consume IndustrialAlert (alertId, sensorId, severity, triggerValue)
+    ROUT->>ROUT: AlertOptionGeneratorDomainService genera opciones según severidad
+    Note right of ROUT: Opciones: APAGADO_INMEDIATO, PROGRAMAR_MANTENIMIENTO_AHORA,\nRECONOCER_Y_ESPERAR_24H, IGNORAR_10_MINUTOS
+    ROUT->>FANOUT: Publica HumanActionRequest (JSON con IDs planos @JsonValue)
+    opt Si severity == CRITICAL (con Cooldown de 60s)
+        ROUT--)SNS: Publica Boletín de Alerta Temprana ISO 10816-3 al Correo Institucional
+    end
+    FANOUT->>OCON: Enruta copia a 'human_alerts_console_queue'
+    OCON->>OP: Push WebSocket STOMP (/topic/operator-alerts)
+    OP->>OP: Visualiza tarjeta de alerta y botones de maniobra interactivos
+```
 
-    CHECK_CRIT -->|"No"| CHECK_WARN{"¿3 lecturas consecutivas\n> 75.0 mm/s?"}
-    CHECK_WARN -->|"Sí"| TRANS_WARN{"¿Estado actual == NORMAL?"}
-    TRANS_WARN -->|"Sí (Transición)"| EMIT_WARN["Cambiar a WarningSensorState\nEmitir Alerta en 'alerts_warning'"]
-    TRANS_WARN -->|"No"| SUPPRESS
+---
 
-    CHECK_WARN -->|"No"| NORMALIZE["Mantener / Regresar a NormalSensorState\n(Sin emisión de alerta)"]
+## 3. Proceso C: Decisión Humana, Auditoría ACID (`afterCommit`), Retardo `x-delay` y Ejecución en Workers
 
-    EMIT_CRIT --> ROUTER["alert_router: Generar Opciones"]
-    EMIT_WARN --> ROUTER
+Demuestra la **consistencia transaccional** entre PostgreSQL y RabbitMQ, el funcionamiento del plugin **`rabbitmq_delayed_message_exchange`** y la distribución de carga entre las **2 réplicas** de cada worker.
 
-    ROUTER --> HUMAN{"Decisión del Operador\nen Consola SCADA"}
+```mermaid
+sequenceDiagram
+    autonumber
+    actor OP as 👷 Operador Autenticado (operator / admin)
+    participant DISP as ⚖️ action_dispatcher
+    participant PG as 🗄️ PostgreSQL 16 (operator_decision_audit)
+    participant RMQ_IMM as 🐇 Exchange: immediate_actions
+    participant RMQ_DLY as ⏳ Exchange: delayed_actions (x-delayed-message)
+    participant ACT as 🛑 actuator_worker (2 Réplicas)
+    participant MAINT as 🔧 maintenance_worker (2 Réplicas)
+    participant SNS as ☁️ Amazon SNS (Correo Institucional)
 
-    HUMAN -->|"APAGADO_INMEDIATO"| TX_AUDIT["1. Guardar en PostgreSQL (ACID)"]
-    HUMAN -->|"PROGRAMAR_MANTENIMIENTO_AHORA"| TX_AUDIT
-    HUMAN -->|"RECONOCER_Y_ESPERAR_24H"| TX_AUDIT
-    HUMAN -->|"IGNORAR_10_MINUTOS"| TX_AUDIT
+    OP->>DISP: POST /api/dispatcher/decide (Basic Auth + Acción + Notas)
+    DISP->>DISP: Extrae operatorId real del SecurityContext (Principal)
+    DISP->>PG: BEGIN TX -> INSERT INTO operator_decision_audit -> COMMIT
+    PG-->>DISP: Confirmación exitosa (auditRecordId = #N)
 
-    TX_AUDIT --> AFTER_COMMIT["2. Hook afterCommit() + Boletín AWS SNS"]
+    Note over DISP: Se dispara TransactionSynchronization.afterCommit()
 
-    AFTER_COMMIT -->|"Corte Crítico"| Q_ACT["Cola: critical_actions_queue\n-> actuator_worker (x2)"]
-    AFTER_COMMIT -->|"Mantenimiento Inmediato"| Q_MAINT["Cola: maintenance_queue\n-> maintenance_worker (x2)"]
-    AFTER_COMMIT -->|"Diferido x-delay"| EX_DELAY["Exchange: delayed_actions_exchange\n(Espera x-delay -> maintenance_queue)"]
-    AFTER_COMMIT -->|"Ignorar"| AUDIT_ONLY["Solo Auditoría en PostgreSQL\n(Sin comando a workers)"]
+    alt Opción 1: APAGADO_INMEDIATO
+        DISP->>RMQ_IMM: Publica con routingKey 'critical.shutdown'
+        RMQ_IMM->>ACT: Entrega en 'critical_actions_queue' (Balanceo Round-Robin)
+        ACT->>ACT: Cambia máquina a EMERGENCY_HALTED
+    else Opción 2: PROGRAMAR_MANTENIMIENTO_AHORA
+        DISP->>RMQ_IMM: Publica con routingKey 'maintenance.immediate'
+        RMQ_IMM->>MAINT: Entrega inmediata en 'maintenance_queue'
+        MAINT->>MAINT: Crea Orden de Trabajo Inmediata (COMPLETED)
+    else Opción 3: RECONOCER_Y_ESPERAR_24H (Tarea Diferida)
+        DISP->>RMQ_DLY: Publica con cabecera 'x-delay: 10000' (10s simulación de 24h)
+        Note over RMQ_DLY: El Broker RabbitMQ retiene el mensaje en memoria/disco durante x-delay
+        RMQ_DLY->>MAINT: Al expirar el tiempo, libera hacia 'maintenance_queue'
+        MAINT->>MAINT: Crea Orden de Trabajo Diferida (DELAYED_COMPLETED)
+    else Opción 4: IGNORAR_10_MINUTOS
+        Note over DISP: Queda auditado formalmente en PostgreSQL sin enviar comando a los workers
+    end
+
+    DISP--)SNS: Envía Acta Oficial de Resolución ISO 10816-3 al correo del Ingeniero
+    DISP-->>OP: HTTP 200 OK + Elimina alerta resuelta de operator_console_backend
 ```

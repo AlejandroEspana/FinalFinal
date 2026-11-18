@@ -64,7 +64,26 @@ sudo tail -n 20 /var/log/scada-autodeploy.log
 
 ---
 
-## 2. Conexión Segura por SSH a la Máquina Virtual
+## 2. ¿Qué Hacer Cuando Apagas (Stop) y Vuelves a Prender (Start) la Instancia EC2?
+
+En AWS EC2 (bajo la Capa Gratuita), cuando **detienes (Stop)** la instancia para ahorrar horas y luego la **inicias (Start)**:
+1. **Todo arranca automáticamente al encender**:
+   * La memoria Swap de 6 GB (`/etc/fstab`), el firewall UFW, Fail2ban, `auditd`, el puente `scada-sns-bridge.service` y el nuevo servicio **`scada-boot-sync.service`** están habilitados en `systemd` para ejecutarse solos en cada arranque del sistema operativo.
+   * Además, **`scada-boot-sync.service`** levanta los 15 contenedores Docker y **detecta automáticamente la nueva IP pública asignada por AWS para actualizar el origen de Amazon CloudFront (`https://dnzhr4v1oxvn7.cloudfront.net`)** sin que cambie tu enlace de CloudFront.
+2. **¿Cómo conectarte por SSH y verificar/forzar la sincronización manualmente en terminal tras encenderla?**
+   * **Paso 1**: En tu consola de AWS EC2, mira la **nueva dirección IPv4 pública** que AWS le asignó a la instancia al encenderla (ejemplo: `XX.XX.XX.XX`).
+   * **Paso 2**: Conéctate por SSH desde PowerShell usando esa nueva IP:
+     ```powershell
+     ssh -i "aws-iot-key.pem" ubuntu@<NUEVA_IP_PUBLICA>
+     ```
+   * **Paso 3**: Una vez dentro de la terminal de Ubuntu, ejecuta este **único comando** para verificar que los 15 contenedores estén arriba y sincronizar la nueva IP con CloudFront:
+     ```bash
+     sudo /usr/local/sbin/scada-boot-sync.sh && sudo docker compose -f ~/FinalFinal/docker-compose.yml ps
+     ```
+
+---
+
+## 3. Conexión Segura por SSH a la Máquina Virtual
 
 Desde PowerShell o terminal en tu equipo local (ubicado en la carpeta del proyecto):
 

@@ -561,8 +561,94 @@ EOF
 sudo chmod 700 /usr/local/sbin/scada-autodeploy.sh
 echo '*/2 * * * * root /usr/local/sbin/scada-autodeploy.sh >> /var/log/scada-autodeploy.log 2>&1' | sudo tee /etc/cron.d/scada-autodeploy > /dev/null
 
+# -----------------------------------------------------------------------------
+# FASE 12: Servicio de Arranque Automatico tras Apagar/Prender la Instancia EC2
+# -----------------------------------------------------------------------------
+echo "[Fase 12] Configurando servicio systemd scada-boot-sync.service (Auto-inicio tras apagar/prender EC2)..."
+cat << 'EOF' | sudo tee /usr/local/sbin/scada-boot-sync.sh > /dev/null
+#!/usr/bin/env bash
+set -e
+
+echo "[BOOT-SYNC] 1. Levantando los 15 contenedores Docker de la plataforma SCADA..."
+cd /home/ubuntu/FinalFinal
+docker compose up -d
+
+if [ -f /etc/scada-ssl/scada.crt ] && [ -f /etc/scada-ssl/scada.key ]; then
+    docker cp /etc/scada-ssl/scada.crt iot_frontend_dashboard:/etc/nginx/ssl/scada.crt || true
+    docker cp /etc/scada-ssl/scada.key iot_frontend_dashboard:/etc/nginx/ssl/scada.key || true
+    docker exec iot_frontend_dashboard nginx -s reload || true
+fi
+
+echo "[BOOT-SYNC] 2. Verificando IP publica actual de EC2 y sincronizando Amazon CloudFront..."
+/usr/bin/python3 - << 'PYEOF'
+import urllib.request
+import boto3
+
+def get_public_ip():
+    try:
+        req = urllib.request.Request(
+            "http://169.254.169.254/latest/api/token",
+            method="PUT",
+            headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"}
+        )
+        token = urllib.request.urlopen(req, timeout=2).read().decode()
+        req2 = urllib.request.Request(
+            "http://169.254.169.254/latest/meta-data/public-ipv4",
+            headers={"X-aws-ec2-metadata-token": token}
+        )
+        return urllib.request.urlopen(req2, timeout=2).read().decode().strip()
+    except Exception:
+        return None
+
+pub_ip = get_public_ip()
+if pub_ip:
+    new_origin_domain = f"scada-ucc-alejandro.{pub_ip}.sslip.io"
+    print(f"[BOOT-SYNC] IP Publica actual detectada: {pub_ip} -> Origin: {new_origin_domain}")
+    try:
+        cf = boto3.client("cloudfront")
+        dists = cf.list_distributions().get("DistributionList", {}).get("Items", [])
+        for d in dists:
+            if d.get("Comment") == "SCADA-IoT-Predictive-Maintenance-UCC":
+                dist_id = d["Id"]
+                full = cf.get_distribution_config(Id=dist_id)
+                etag = full["ETag"]
+                cfg = full["DistributionConfig"]
+                current_domain = cfg["Origins"]["Items"][0]["DomainName"]
+                if current_domain != new_origin_domain:
+                    cfg["Origins"]["Items"][0]["DomainName"] = new_origin_domain
+                    cf.update_distribution(Id=dist_id, IfMatch=etag, DistributionConfig=cfg)
+                    print(f"[BOOT-SYNC] Amazon CloudFront ({d['DomainName']}) actualizado con la nueva IP {pub_ip}")
+                else:
+                    print(f"[BOOT-SYNC] Amazon CloudFront ({d['DomainName']}) ya apunta a {new_origin_domain}")
+    except Exception as e:
+        print(f"[BOOT-SYNC] Aviso CloudFront: {e}")
+PYEOF
+
+echo "[BOOT-SYNC] Todos los servicios estan activos y sincronizados."
+EOF
+sudo chmod 700 /usr/local/sbin/scada-boot-sync.sh
+
+cat << 'EOF' | sudo tee /etc/systemd/system/scada-boot-sync.service > /dev/null
+[Unit]
+Description=Sincronizacion Automatica de Contenedores SCADA y CloudFront al Iniciar EC2
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/scada-boot-sync.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable scada-boot-sync.service
+
 echo "========================================================================"
-echo "[COMPLETADO] HARDENING + S3 + CLOUDWATCH + ACM + AUTODEPLOY ACTIVOS"
+echo "[COMPLETADO] HARDENING + S3 + CLOUDWATCH + ACM + AUTODEPLOY + BOOT-SYNC ACTIVOS"
 echo "========================================================================"
 sudo ufw status verbose
 sudo fail2ban-client status
