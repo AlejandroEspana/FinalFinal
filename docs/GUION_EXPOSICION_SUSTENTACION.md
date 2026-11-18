@@ -1,77 +1,135 @@
-# Guion de Exposición y Sustentación — Plataforma de Mantenimiento Predictivo Interactivo (IoT Industrial)
+# Guion Maestro de Exposición y Sustentación Técnica — Plataforma SCADA IoT Industrial
 
-**Asignaturas Integradas**: Programación Orientada a Objetos Avanzada (POO) • Sistemas Distribuidos (SD) • Sistemas Operativos (SO)
-**URL Pública en Producción (AWS CloudFront + TLS Nativo)**: `https://dnzhr4v1oxvn7.cloudfront.net`
+**Proyecto**: Plataforma de Mantenimiento Predictivo Interactivo con Gemelo Digital 3D
+**Asignaturas**: Programación Orientada a Objetos Avanzada (POO) • Sistemas Distribuidos (SD) • Sistemas Operativos (SO)
+**URL Oficial en Producción (AWS CloudFront + TLS Nativo)**: `https://dnzhr4v1oxvn7.cloudfront.net`
 
 ---
 
-## Parte 1: Introducción y Resumen Ejecutivo (¿Qué construimos?)
+## 1. ¿Cuál es el "Microservicio Padre" o el que Controla y Recibe Más Información?
 
-> *"Buenos días/tardes. Presentamos nuestra **Plataforma Distribuida de Mantenimiento Predictivo Interactivo para IoT Industrial con Gemelo Digital 3D**, desplegada en la nube de **Amazon Web Services (AWS)** sobre **Ubuntu Server 24.04 LTS**.*
+Si el profesor pregunta: ***"¿Cuál es el microservicio padre o el que controla todo el sistema?"***, esta es la respuesta arquitectónica exacta:
+
+> *"Al ser una **arquitectura de microservicios orientada a eventos (Event-Driven Architecture)**, no existe un monolito único que bloquee a los demás; sin embargo, el sistema tiene **dos cerebros o núcleos centrales** según el flujo:*
 >
-> *El sistema resuelve un problema crítico en la industria: monitorear en tiempo real un flujo continuo de vibraciones mecánicas bajo la **norma ISO 10816-3**, detectar patrones de falla mediante procesamiento **stateful** sin generar tormentas de alertas, presentar opciones dinámicas de intervención a un operador humano en una consola interactiva con **Gemelo Digital 3D del edificio**, auditar cada decisión humana con garantías **ACID en PostgreSQL**, enrutar comandos inmediatos o diferidos hacia workers concurrentes y despachar boletines técnicos oficiales al correo institucional mediante **Amazon SNS**."*
+> 1. **En el Flujo de Datos Masivos (El que recibe más volumen de información): `alert_detector` y `plant_monitor_backend`**
+>    * Ambos reciben el **100% del flujo continuo de telemetría** desde el tópico `sensor_data` de **Apache Kafka** (las lecturas de los 10 sensores de toda la planta).
+>    * **`alert_detector`** es el **Cerebro Analítico Stateful**: concentra toda la historia reciente en ventanas móviles (`SensorVibrationWindow`) y decide cuándo nace una alerta.
+>
+> 2. **En el Flujo de Decisiones, Seguridad y Persistencia (El "Microservicio Padre / Orquestador Transaccional"): `action_dispatcher`**
+>    * **`action_dispatcher` es el microservicio de gobierno y control central de la plataforma**. ¿Por qué? Porque es el único que conecta **4 mundos al mismo tiempo**:
+>      1. Valida la identidad y el rol del operador humano con **Spring Security (`ROLE_OPERATOR` / `ROLE_ADMIN`)**.
+>      2. Es el dueño exclusivo de la base de datos transaccional **PostgreSQL 16 (`operator_decision_audit`)**.
+>      3. Controla y ordena a **RabbitMQ** qué comando enviar a los **Workers de Actuación** (corte de energía inmediato) o a los **Workers de Mantenimiento** (orden inmediata o diferida con `x-delay`).
+>      4. Dispara los boletines corporativos **ISO 10816-3** hacia **Amazon SNS** (Correo Institucional y SMS)."
 
 ---
 
-## Parte 2: Justificación de la Arquitectura Híbrida (¿Por qué Kafka + RabbitMQ + PostgreSQL?)
+## 2. Mapa Exacto de Archivos donde se Implementa Apache Kafka (Dónde está y Qué hace)
 
-El caso de estudio nos retó a separar el **Flujo de Datos** del **Flujo de Decisiones** y la **Persistencia de Auditoría**. Así se implementó y justificó cada uno:
+Apache Kafka maneja todo el **"Flujo de Datos" (alta ingesta y procesamiento stateful)**. Se toca exactamente en **4 microservicios** a través de los siguientes archivos:
 
-1. **Apache Kafka (El Bus de Eventos de Alto Consumo y Flujo de Datos)**:
-   * **¿Dónde se usa?**: En la ingesta de lecturas (`sensor_data` con 3 particiones) y la emisión de anomalías (`alerts_warning` y `alerts_critical`).
-   * **¿Por qué Kafka aquí?**: Porque soporta alto throughput de telemetría como un log distribuido inmutable y permite **particionamiento por clave (`Key = sensorId`)**. Al usar el ID del sensor (`sensor_A` ... `sensor_J`) como clave de partición, Kafka garantiza matemáticamente que todas las lecturas de una misma máquina lleguen **en estricto orden cronológico** a la misma instancia consumidora para evaluar la ventana móvil sin condiciones de carrera.
-2. **RabbitMQ (El Bus de Enrutamiento Complejo y Flujo de Decisiones)**:
-   * **¿Dónde se usa?**: Desde que una alerta requiere intervención humana hasta que el comando llega a los actuadores o cuadrillas de mantenimiento.
-   * **¿Por qué RabbitMQ aquí?**: Porque necesitamos patrones avanzados de enrutamiento AMQP que Kafka no ofrece de forma nativa:
-     * **Fanout Exchange (`human_alerts`)**: Para difundir alertas hacia la consola del operador.
-     * **Direct Exchange (`immediate_actions_exchange`)**: Para enrutar selectivamente según la decisión humana (`critical.shutdown` hacia `critical_actions_queue` o `maintenance.immediate` hacia `maintenance_queue`).
-     * **Delayed Message Exchange (`delayed_actions_exchange` con plugin `rabbitmq_delayed_message_exchange`)**: Para gestionar tareas diferidas con la cabecera **`x-delay`** cuando el operador elige `RECONOCER_Y_ESPERAR_24H`.
-3. **PostgreSQL 16 (El Motor Relacional Transaccional ACID de Auditoría)**:
-   * **¿Dónde se usa?**: En `action_dispatcher` (tabla `operator_decision_audit`).
-   * **¿Por qué PostgreSQL aquí?**: En un entorno industrial, ninguna orden de parada de planta o mantenimiento puede ejecutarse sin dejar un rastro forense inmutable de quién la autorizó, cuándo y por qué. Implementamos sincronización transaccional **`TransactionSynchronization.afterCommit()`** para garantizar que el comando solo salga hacia RabbitMQ y Amazon SNS después de que el `COMMIT` en PostgreSQL haya sido exitoso.
+### 2.1. En `sensor_producer` (Productor de Telemetría con Particionamiento por Clave)
+* **Puerto de Dominio**: [TelemetryEventPublisherPort.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/sensor_producer/src/main/java/com/empresa/mantenimiento/domain/repository/TelemetryEventPublisherPort.java)
+* **Adaptador Kafka**: [KafkaTelemetryPublisherAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/sensor_producer/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/KafkaTelemetryPublisherAdapter.java#L20-L58)
+  * **¿Qué hace exactamente este archivo?**:
+    * Recibe el Value Object inmutable `VibrationReadingRecord` (generado cada 12s por [GenerateTelemetryBatchUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/sensor_producer/src/main/java/com/empresa/mantenimiento/application/usecase/GenerateTelemetryBatchUseCase.java) o inyectado manualmente por [InjectCustomReadingUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/sensor_producer/src/main/java/com/empresa/mantenimiento/application/usecase/InjectCustomReadingUseCase.java)).
+    * En la **línea 41**, extrae `String partitionKey = reading.sensorId().value();` (por ejemplo, `"sensor_A"`).
+    * En la **línea 45**, ejecuta `kafkaTemplate.send("sensor_data", partitionKey, jsonPayload)`.
+    * **¿Por qué es clave para la nota?**: Al pasar `partitionKey` como segundo parámetro de `kafkaTemplate.send(...)`, el algoritmo de hash de Kafka envía todas las lecturas de `"sensor_A"` siempre a la misma partición (de las 3 disponibles en `docker-compose.yml`), garantizando **orden cronológico estricto por sensor**.
 
----
+### 2.2. En `alert_detector` (Consumidor Stateful de Telemetría y Productor de Alertas)
+Aquí Kafka se usa tanto de **entrada** como de **salida**:
+1. **Adaptador Kafka de Entrada (Consumidor)**: [KafkaSensorTelemetryConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/KafkaSensorTelemetryConsumerAdapter.java#L15-L42)
+   * Usa la anotación `@KafkaListener(topics = "sensor_data", groupId = "alert-detector-group")`.
+   * Deserializa el JSON a `VibrationReadingRecord` y llama al caso de uso [EvaluateSensorTelemetryUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/application/usecase/EvaluateSensorTelemetryUseCase.java#L35-L46), el cual busca la ventana móvil del sensor en [WindowRegistryDomainService.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/service/WindowRegistryDomainService.java) y ejecuta `window.procesarTelemetria(reading, detectionStrategy)` en [SensorVibrationWindow.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/SensorVibrationWindow.java#L66-L84).
+2. **Adaptador Kafka de Salida (Productor de Alertas)**: [KafkaAlertPublisherAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/KafkaAlertPublisherAdapter.java#L20-L61)
+   * Cuando `SensorVibrationWindow` detecta una **transición de estado**, invoca `publishAlert(IndustrialAlert alert)`.
+   * En la **línea 44**, selecciona dinámicamente el tópico de destino según la severidad:
+     `String targetTopic = (alert.severity() == AlertSeverity.CRITICAL) ? "alerts_critical" : "alerts_warning";`
+   * Publica la alerta en Kafka manteniendo el `sensorId` como clave.
 
-## Parte 3: ¿Para qué sirve cada uno de los 8 Microservicios Desplegados?
+### 2.3. En `alert_router` (Puente Consumidor de Kafka hacia RabbitMQ)
+* **Adaptador Kafka**: [KafkaAlertBridgeConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/KafkaAlertBridgeConsumerAdapter.java)
+  * **¿Qué hace?**: Escucha simultáneamente los dos tópicos de alertas de Kafka (`@KafkaListener(topics = {"alerts_critical", "alerts_warning"}, groupId = "alert-router-group")`), convierte el JSON en `IndustrialAlert` y lo pasa a [RouteAlertToHumanUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/application/usecase/RouteAlertToHumanUseCase.java) para que cruce hacia el mundo de RabbitMQ.
 
-Todos los microservicios están desarrollados en **Java 17 y Spring Boot 3.3.5**, siguiendo una **Arquitectura Hexagonal de 4 capas** (`domain`, `application`, `infrastructure`, `presentation`):
-
-| # | Microservicio | Función Principal en la Plataforma | Entradas y Salidas |
-| :-: | :--- | :--- | :--- |
-| **1** | **`sensor_producer`** | **Simulador Industrial e Inyector de Telemetría**: Genera lecturas realistas cada 12 segundos para los 10 sensores del edificio (`sensor_A` a `sensor_J`) y expone endpoints REST para pausar/reanudar la simulación o inyectar picos críticos (`>90 mm/s`) y ráfagas (`3x >75 mm/s`). | **Salida**: Tópico Kafka `sensor_data` (particionado por `Key = sensorId`). |
-| **2** | **`alert_detector`** | **Motor Analítico Stateful en Ventana Móvil**: Mantiene una ventana deslizante (`SensorStreamWindow`) en memoria por sensor. Aplica el **Patrón Strategy** para detectar anomalías y el **Patrón State** para emitir alertas únicamente en la **transición de estado** (`Normal` $\rightarrow$ `Warning` o `Critical`), evitando tormentas de alertas. | **Entrada**: Kafka `sensor_data`.<br>**Salida**: Kafka `alerts_warning` y `alerts_critical`. |
-| **3** | **`alert_router`** | **Enrutador y Generador de Opciones**: Consume las alertas detectadas en Kafka, invoca el servicio de dominio puro `AlertOptionGeneratorDomainService` para construir las opciones de acción humana y las publica hacia RabbitMQ y Amazon SNS. | **Entrada**: Kafka `alerts_*`.<br>**Salida**: RabbitMQ Fanout `human_alerts` + Amazon SNS. |
-| **4** | **`plant_monitor_backend`** | **Monitor de Estado de Planta y Gemelo Digital 3D**: Consume el flujo de Kafka en tiempo real, mantiene el estado operativo de las 10 máquinas de los 3 pisos del edificio y transmite actualizaciones instantáneas por WebSocket STOMP al frontend. | **Entrada**: Kafka `sensor_data`.<br>**Salida**: WebSocket `/ws-plant` y API `/api/plant/status`. |
-| **5** | **`operator_console_backend`** | **Consola de Alertas Pendientes del Operador**: Escucha la cola `human_alerts_console_queue` en RabbitMQ, almacena las alertas activas pendientes de decisión humana y las empuja en vivo por WebSocket hacia el navegador. | **Entrada**: RabbitMQ `human_alerts_console_queue`.<br>**Salida**: WebSocket `/ws-alerts` y `DELETE /api/alerts/{id}`. |
-| **6** | **`action_dispatcher`** | **Cerebro Transaccional, Seguridad y Auditoría**: Protegido con **Spring Security (`ROLE_OPERATOR` y `ROLE_ADMIN`)**. Recibe la decisión del operador, toma su identidad real del `Principal` autenticado, guarda el acta en **PostgreSQL**, y tras el `COMMIT` enruta el comando a RabbitMQ (inmediato o diferido `x-delay`) y envía el boletín ISO 10816-3 por **Amazon SNS**. | **Entrada**: `POST /api/dispatcher/decide`.<br>**Salida**: PostgreSQL `operator_decision_audit`, RabbitMQ Exchanges y Amazon SNS. |
-| **7** | **`actuator_worker` (2 Réplicas)** | **Ejecutor de Paradas de Emergencia**: Desplegado con **2 réplicas concurrentes** en Docker Compose. Consume en balanceo *round-robin* la cola `critical_actions_queue` cuando el operador ordena `APAGADO_INMEDIATO`, cortando la energía de la máquina (`EMERGENCY_HALTED`). | **Entrada**: RabbitMQ `critical_actions_queue`.<br>**Salida**: Estado del actuador y reactivación (`reset`). |
-| **8** | **`maintenance_worker` (2 Réplicas)** | ** Gestor de Órdenes de Mantenimiento Inmediatas y Diferidas**: Desplegado con **2 réplicas concurrentes**. Consume la cola `maintenance_queue` tanto para órdenes inmediatas (`PROGRAMAR_MANTENIMIENTO_AHORA`) como para órdenes que maduran tras el tiempo de espera en el plugin `x-delayed-message` (`RECONOCER_Y_ESPERAR_24H`). | **Entrada**: RabbitMQ `maintenance_queue` (directo o vía `delayed_actions_exchange`). |
+### 2.4. En `plant_monitor_backend` (Consumidor de Kafka en Tiempo Real para el Gemelo 3D)
+* **Adaptador Kafka**: [KafkaPlantConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/plant_monitor_backend/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/KafkaPlantConsumerAdapter.java)
+  * **¿Qué hace?**: Escucha el tópico `sensor_data` con su propio grupo consumidor independiente (`plant-monitor-group`), actualiza la vista materializada en [PlantMaterializedDomainService.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/plant_monitor_backend/src/main/java/com/empresa/mantenimiento/domain/service/PlantMaterializedDomainService.java) y empuja el cambio por WebSocket STOMP en [WebSocketPlantBroadcasterAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/plant_monitor_backend/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/WebSocketPlantBroadcasterAdapter.java) para mover en vivo las barras y el **Gemelo Digital 3D del Edificio**.
 
 ---
 
-## Parte 4: ¿Dónde se Aplicaron los Principios de POO Avanzada y Calidad de Software?
+## 3. Mapa Exacto de Archivos donde se Implementa RabbitMQ (Dónde está y Qué hace)
 
-1. **Dominio Rico y Puro (Sin Anotaciones de Framework)**:
-   * Ninguna clase dentro de `domain/model` o `domain/service` importa paquetes de Spring (`@Service`, `@Component`) ni de JPA. Los servicios de dominio se registran mediante clases `@Configuration` en la capa de infraestructura.
-2. **Value Objects Inmutables con Java `record`**:
-   * `SensorId`, `AlertId` y `VibrationReadingRecord` validan sus invariantes en el constructor compacto (rechazando nulos, vacíos o vibraciones negativas) y usan `@JsonValue` / `@JsonCreator` para serializar contratos JSON limpios.
-3. **Patrón de Diseño State (`SensorOperationalState`)**:
-   * Implementado en `NormalSensorState`, `WarningSensorState` y `CriticalSensorState` dentro de `alert_detector`. Resuelve el problema de las tormentas de alertas emitiendo eventos solo cuando el sensor cambia de estado.
-4. **Patrón de Diseño Strategy (`AnomalyDetectionStrategy`)**:
-   * Implementado en `ThresholdSlidingWindowStrategy` (umbrales fijos 75/90 mm/s) y `ExponentialMovingAverageStrategy` (suavizado exponencial EMA), inyectables por configuración sin modificar el caso de uso (`Open/Closed Principle`).
-5. **Pruebas Unitarias Aisladas con Patrón AAA (Arrange-Act-Assert)**:
-   * **49 pruebas automatizadas** distribuidas en los 8 microservicios, incluyendo pruebas de lógica de dominio, máquina de estados, estrategias de detección, seguridad HTTP Basic y contratos de serialización JSON.
+RabbitMQ maneja todo el **"Flujo de Decisiones Humanas, Enrutamiento Selectivo y Tareas Diferidas (`x-delay`)"**. Se toca en **5 microservicios** a través de los siguientes archivos:
+
+### 3.1. En `alert_router` (Publicación en Fanout Exchange `human_alerts`)
+* **Configuración de Topología AMQP**: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java) (declara el `FanoutExchange("human_alerts")`).
+* **Servicio de Dominio que genera opciones**: [DecisionOptionsPolicyDomainService.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/domain/service/DecisionOptionsPolicyDomainService.java) (asigna las opciones válidas `APAGADO_INMEDIATO`, `PROGRAMAR_MANTENIMIENTO_AHORA`, `RECONOCER_Y_ESPERAR_24H`, `IGNORAR_10_MINUTOS`).
+* **Adaptador RabbitMQ de Salida**: [RabbitMQHumanAlertPublisherAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQHumanAlertPublisherAdapter.java#L70-L89)
+  * **¿Qué hace?**: Serializa el objeto `HumanActionRequest` y en la **línea 75** ejecuta `rabbitTemplate.convertAndSend("human_alerts", "", payload)` (en Fanout la routing key va vacía `""` porque difunde a todas las colas suscritas). Además, si es `CRITICAL`, envía en asíncrono el boletín temprano a **Amazon SNS**.
+
+### 3.2. En `operator_console_backend` (Consumo de la Cola del Fanout Exchange)
+* **Adaptador RabbitMQ de Entrada**: [RabbitMQHumanAlertConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/operator_console_backend/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQHumanAlertConsumerAdapter.java)
+  * **¿Qué hace?**: Con `@RabbitListener(queues = "human_alerts_console_queue")`, recibe la alerta con sus opciones desde RabbitMQ, la guarda en [PendingAlertsRegistryDomainService.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/operator_console_backend/src/main/java/com/empresa/mantenimiento/domain/service/PendingAlertsRegistryDomainService.java) y la transmite por WebSocket en [WebSocketOperatorAlertBroadcasterAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/operator_console_backend/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/WebSocketOperatorAlertBroadcasterAdapter.java) para que aparezca al instante en la consola derecha del operador.
+
+### 3.3. En `action_dispatcher` (Enrutamiento Inmediato y Diferido con Plugin `x-delayed-message`)
+* **Configuración del Exchange Diferido (`x-delayed-message`)**: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java)
+  * Declara el `CustomExchange("delayed_actions_exchange", "x-delayed-message")` con el argumento `"x-delayed-type": "direct"` y su `Binding` hacia la cola `maintenance_queue` con routing key `maintenance_route`.
+* **Caso de Uso Transaccional (`afterCommit`)**: [ProcessOperatorDecisionUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/application/usecase/ProcessOperatorDecisionUseCase.java#L44-L117)
+  * Primero guarda la decisión en PostgreSQL (`auditRepositoryPort.recordAudit(decision)` en la línea 52) a través de [JpaDecisionAuditRepositoryAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/JpaDecisionAuditRepositoryAdapter.java).
+  * En las **líneas 56-63**, registra `TransactionSynchronizationManager.registerSynchronization(...)` para que `dispatchToBroker(...)` se ejecute **únicamente dentro de `afterCommit()`**.
+* **Adaptador RabbitMQ de Despacho**: [RabbitMQActionCommandPublisherAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQActionCommandPublisherAdapter.java#L52-L98)
+  * Tiene los **3 métodos clave de despacho**:
+    1. `dispatchShutdown(ShutdownCommand)` (**línea 53**): Envía orden de corte inmediato a la cola `critical_actions_queue`.
+    2. `dispatchImmediateMaintenance(MaintenanceWorkOrder)` (**línea 72**): Envía orden inmediata a la cola `maintenance_queue`.
+    3. `dispatchDelayedMaintenance(MaintenanceWorkOrder, long delayMillis)` (**línea 84**): Crea un `MessageProperties`, inyecta la cabecera **`props.setHeader("x-delay", delayMillis)`** (**línea 89**) y publica el mensaje en `delayed_actions_exchange`. El plugin `rabbitmq_delayed_message_exchange` retiene el mensaje durante los `10000 ms` (que simulan 24 horas) y luego lo deposita en `maintenance_queue`.
+
+### 3.4. En `actuator_worker` (2 Réplicas Consumiendo Paradas Críticas)
+* **Adaptador RabbitMQ**: [RabbitMQCriticalActionConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/actuator_worker/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQCriticalActionConsumerAdapter.java)
+  * **¿Qué hace?**: Escucha `@RabbitListener(queues = "critical_actions_queue")`. Como hay **2 réplicas** levantadas en Docker Compose, RabbitMQ reparte los mensajes en **Round-Robin**. Ejecuta [ExecuteEmergencyShutdownUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/actuator_worker/src/main/java/com/empresa/mantenimiento/application/usecase/ExecuteEmergencyShutdownUseCase.java), pasando el actuador físico ([PhysicalActuator.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/actuator_worker/src/main/java/com/empresa/mantenimiento/domain/model/PhysicalActuator.java)) de `RunningMachineState` a `EmergencyHaltedMachineState`.
+
+### 3.5. En `maintenance_worker` (2 Réplicas Consumiendo Mantenimiento Inmediato y Diferido)
+* **Adaptador RabbitMQ**: [RabbitMQMaintenanceConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/maintenance_worker/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQMaintenanceConsumerAdapter.java)
+  * **¿Qué hace?**: Escucha `@RabbitListener(queues = "maintenance_queue")`. Recibe tanto los tickets inmediatos como los tickets que acaban de cumplir su tiempo de retardo `x-delay` en el exchange diferido, y los procesa en [ProcessMaintenanceWorkOrderUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/maintenance_worker/src/main/java/com/empresa/mantenimiento/application/usecase/ProcessMaintenanceWorkOrderUseCase.java).
 
 ---
 
-## Parte 5: Sistemas Operativos (Hardening Ubuntu Server) y Despliegue Cloud en AWS
+## 4. ¿En qué Archivos se Trabajan los 5 Principios SOLID y Cómo se Aplican?
 
-Además de los requisitos base, llevamos el proyecto a un nivel de producción real aplicando **12 fases de Ingeniería de Sistemas Operativos y Cloud en AWS (`aws/hardening-ubuntu.sh`)**:
+Si en la sustentación de **POO Avanzada** te preguntan dónde están los principios **SOLID**, puedes mostrar estos archivos exactos:
 
-1. **Memoria Virtual Swap de 6 GB en SSD y Tuning de Kernel**: Permite ejecutar con holgura los 15 contenedores sobre la capa gratuita de AWS EC2.
-2. **Aislamiento Total de Puertos en `127.0.0.1` y Reverse Proxy Nginx**: Ningún puerto de base de datos (`5432`), brokers (`9092`, `5672`, `15672`) ni microservicios (`8080-8094`) está expuesto a Internet. Todo entra por Nginx con resolución DNS dinámica (`127.0.0.11`).
-3. **Dominio Limpio sin IPs ni Puertos vía Amazon CloudFront (`https://dnzhr4v1oxvn7.cloudfront.net`)**: Distribución CDN oficial de AWS con certificado TLS/SSL nativo de **Amazon Trust Services** y registro en **AWS Certificate Manager (ACM)**.
-4. **Hardening de SSH, PAM, Sudo, UFW, Fail2ban, Kernel `sysctl` (ASLR) y `auditd`**: Protección activa contra fuerza bruta, bloqueo de IPs atacantes en tiempo real y auditoría forense de privilegios evaluada con **Lynis**.
-5. **Notificaciones Reales vía Amazon SNS (Norma ISO 10816-3)**: Servicio `systemd` confinado (`scada-sns-bridge.service`) autenticado por **Rol IAM (`IMDSv2`)** sin guardar llaves de AWS en disco, enviando actas formales al correo institucional.
-6. **Backups Diarios de PostgreSQL con Firma Criptográfica `SHA-256` y Réplica Cifrada `AES-256` en Amazon S3**: Automatizados en `/usr/local/sbin/backup-postgres-scada.sh` hacia el bucket privado `s3://scada-ucc-backups-148395526595`.
-7. **Monitoreo de RAM, Swap, Disco y Contenedores en AWS CloudWatch** + **Auto-Deploy Continuo GitOps** sincronizado cada 2 minutos con la rama `main` de GitHub.
+### 4.1. `S` — Single Responsibility Principle (Principio de Responsabilidad Única)
+* **¿Cómo se aplica?**: Cada clase tiene una única razón para cambiar. Separamos estrictamente la **regla de negocio**, la **coordinación de casos de uso**, la **persistencia SQL**, la **mensajería AMQP/Kafka** y la **presentación HTTP**.
+* **Archivos de ejemplo en `action_dispatcher`**:
+  * [MaintenanceDecision.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/domain/model/MaintenanceDecision.java): Solo valida las reglas de negocio de una decisión (qué cola le corresponde y cuánto retardo lleva).
+  * [ProcessOperatorDecisionUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/application/usecase/ProcessOperatorDecisionUseCase.java): Solo coordina la transacción entre el puerto de base de datos y el puerto de mensajería.
+  * [JpaDecisionAuditRepositoryAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/JpaDecisionAuditRepositoryAdapter.java): Solo sabe guardar en PostgreSQL mediante Spring Data JPA.
+  * [RabbitMQActionCommandPublisherAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQActionCommandPublisherAdapter.java): Solo sabe construir tramas JSON y enviarlas a RabbitMQ.
+  * [MultichannelNotificationService.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/MultichannelNotificationService.java): Solo sabe redactar y despachar el boletín corporativo ISO 10816-3 hacia Amazon SNS.
+
+### 4.2. `O` — Open/Closed Principle (Principio Abierto/Cerrado)
+* **¿Cómo se aplica?**: El motor de detección de anomalías está **abierto a la extensión** (podemos agregar nuevos algoritmos matemáticos de detección) pero **cerrado a la modificación** (no hay que tocar ni una línea de `SensorVibrationWindow` ni de `EvaluateSensorTelemetryUseCase`).
+* **Archivos exactos en `alert_detector`**:
+  * Interfaz [AnomalyDetectionStrategy.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/strategy/AnomalyDetectionStrategy.java)
+  * Implementación 1 (Umbrales fijos ISO 10816-3: `>75 mm/s x3` o `>90 mm/s`): [RuleBasedThresholdStrategy.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/strategy/RuleBasedThresholdStrategy.java)
+  * Implementación 2 (Media Móvil Exponencial EMA): [ExponentialMovingAverageStrategy.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/strategy/ExponentialMovingAverageStrategy.java)
+  * Selección limpia en configuración: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java)
+
+### 4.3. `L` — Liskov Substitution Principle (Principio de Sustitución de Liskov)
+* **¿Cómo se aplica?**: Cualquier implementación de estado o estrategia puede sustituir a su interfaz base sin romper las invariantes ni lanzar excepciones inesperadas.
+* **Archivos exactos en `alert_detector` y `actuator_worker`**:
+  * En `alert_detector`: La interfaz [SensorRiskState.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/state/SensorRiskState.java) es implementada por [NormalSensorState.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/state/NormalSensorState.java), [WarningSensorState.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/state/WarningSensorState.java) y [CriticalSensorState.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/state/CriticalSensorState.java). `SensorVibrationWindow` invoca polimórficamente `currentState.shouldEmitAlert(result)` y `currentState.transition(result)` sin usar `instanceof` ni hacer *castings*.
+  * En `actuator_worker`: La interfaz [MachineOperationalState.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/actuator_worker/src/main/java/com/empresa/mantenimiento/domain/model/MachineOperationalState.java) es sustituida limpiamente entre [RunningMachineState.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/actuator_worker/src/main/java/com/empresa/mantenimiento/domain/model/RunningMachineState.java) y [EmergencyHaltedMachineState.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/actuator_worker/src/main/java/com/empresa/mantenimiento/domain/model/EmergencyHaltedMachineState.java).
+
+### 4.4. `I` — Interface Segregation Principle (Principio de Segregación de Interfaces)
+* **¿Cómo se aplica?**: En vez de tener una interfaz gigante "Omnipotente" en el dominio, definimos **Puertos de Salida (`Port`) pequeños, granulares y específicos** para cada necesidad.
+* **Archivos exactos**:
+  * En `action_dispatcher`: Separamos el puerto de auditoría en base de datos ([DecisionAuditRepositoryPort.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/domain/repository/DecisionAuditRepositoryPort.java), que solo tiene `recordAudit` y `findAllRecent`) del puerto de publicación de comandos ([ActionCommandPublisherPort.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/domain/repository/ActionCommandPublisherPort.java), que solo tiene métodos de envío a colas). Así, el caso de uso de consulta de auditoría ([GetDecisionAuditHistoryUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/application/usecase/GetDecisionAuditHistoryUseCase.java)) solo depende de `DecisionAuditRepositoryPort` y no está forzado a conocer RabbitMQ.
+
+### 4.5. `D` — Dependency Inversion Principle (Principio de Inversión de Dependencias)
+* **¿Cómo se aplica?**: Los módulos de alto nivel (`domain` y `application`) **nunca importan ni dependen de módulos de bajo nivel (`infrastructure`)**. Ambos dependen de abstracciones (interfaces `*Port` ubicadas en el paquete `domain/repository`). Además, todas las clases usan **Inyección Estricta por Constructor** validada con `Objects.requireNonNull(...)` (cero uso de `@Autowired` en campos privados).
+* **Archivos exactos donde se demuestra**:
+  * [EvaluateSensorTelemetryUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/application/usecase/EvaluateSensorTelemetryUseCase.java#L25-L33): Recibe por constructor las interfaces `AnomalyDetectionStrategy` y `AlertPublisherPort`. No sabe que por debajo existe Kafka.
+  * [RouteAlertToHumanUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/application/usecase/RouteAlertToHumanUseCase.java): Recibe por constructor `HumanAlertPublisherPort`. No sabe que por debajo existe RabbitMQ ni Amazon SNS.
+  * [ProcessOperatorDecisionUseCase.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/application/usecase/ProcessOperatorDecisionUseCase.java#L34-L42): Recibe por constructor `DecisionAuditRepositoryPort` y `ActionCommandPublisherPort`. Gracias a esta inversión de dependencias, en los **49 tests unitarios** podemos inyectar *Mocks* de Mockito en milisegundos sin levantar bases de datos ni brokers reales.
