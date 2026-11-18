@@ -203,3 +203,47 @@ Este script implementa la estrategia de **Defensa en Profundidad** sobre Ubuntu 
 | **Fase 11: Auto-Deploy GitOps desde GitHub** ([Líneas 538-563](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L538-L563)) | `/usr/local/sbin/scada-autodeploy.sh`<br>`/etc/cron.d/scada-autodeploy` | Consulta cada 2 minutos la rama `main` de GitHub; si detecta un nuevo commit, actualiza el código y recompila los contenedores automáticamente. |
 | **Fase 12: Sincronización al Encender EC2** ([Líneas 565-645](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/aws/hardening-ubuntu.sh#L565-L645)) | `/usr/local/sbin/scada-boot-sync.sh`<br>`/etc/systemd/system/scada-boot-sync.service` | Al apagar y volver a prender la instancia EC2, levanta los 15 contenedores, detecta la nueva IP pública asignada por AWS y actualiza automáticamente **Amazon CloudFront (`https://dnzhr4v1oxvn7.cloudfront.net`)**. |
 
+---
+
+## 7. ¿Cómo se Utilizaron los `record` de Java 17 y sus Constructores Compactos para Hacer Validaciones en el Backend?
+
+**¡Sí!** En los **8 microservicios** utilizamos la característica moderna de **Java 17 `record` con Constructor Compacto (`public NombreRecord { ... }`)** para implementar **Value Objects Inmutables con Validación *Fail-Fast*** (es decir, es imposible instanciar en memoria un objeto con datos inválidos, nulos o fuera de rango físico).
+
+Aquí están los **6 `record` principales con validaciones de negocio** que puedes mostrar al profesor:
+
+### 7.1. `VibrationReadingRecord` (Validación de Rangos Físicos e Infinitos/`NaN`)
+* **Archivo**: [VibrationReadingRecord.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/VibrationReadingRecord.java#L7-L28) (Presente en `sensor_producer`, `alert_detector` y `plant_monitor_backend`).
+* **¿Qué valida su constructor compacto?**:
+  1. Que `sensorId` y `timestamp` no sean nulos (`Objects.requireNonNull`).
+  2. Que `vibrationValue` no sea `NaN` ni infinito (`Double.isNaN(vibrationValue) || Double.isInfinite(vibrationValue)`).
+  3. Que la vibración esté dentro de los límites físicos reales de un sensor industrial (`0.0 <= vibrationValue <= 500.0 mm/s`). Si alguien intenta inyectar una vibración negativa (`-5.0`) o absurda (`9999.0`), el `record` lanza `IllegalArgumentException` inmediatamente antes de entrar a Kafka.
+
+### 7.2. `SensorId` y `AlertId` (Validación de Identificadores No Vacíos y Serialización Plana)
+* **Archivos**:
+  * [SensorId.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/SensorId.java#L14-L37) (En los **8 microservicios**).
+  * [AlertId.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/AlertId.java) (En `alert_detector`, `alert_router`, `operator_console_backend`, `action_dispatcher` y `plant_monitor_backend`).
+* **¿Qué valida su constructor compacto?**:
+  1. Verifica que el `String value` no sea `null`.
+  2. Aplica `.trim()` para limpiar espacios en blanco accidentales y valida que no quede vacío (`if (trimmed.isEmpty()) throw new IllegalArgumentException(...)`).
+  3. Reasigna el valor normalizado (`value = trimmed;`) y usa `@JsonValue` + `@JsonCreator` para que al viajar por JSON se serialice como texto limpio (`"sensor_A"`) en vez de un objeto anidado.
+
+### 7.3. `HumanActionRequest` (Validación de Lista Inmutable de Opciones para el Operador)
+* **Archivo**: [HumanActionRequest.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/domain/model/HumanActionRequest.java#L14-L34) (En `alert_router` y `operator_console_backend`).
+* **¿Qué valida su constructor compacto?**:
+  1. Valida que `alertId`, `sensorId`, `severity`, `availableOptions` y `timestamp` no sean nulos.
+  2. Verifica que la lista de opciones de mitigación no esté vacía (`if (availableOptions.isEmpty()) throw new RoutingDomainException(...)`).
+  3. Hace una **copia defensiva inmutable** (`availableOptions = Collections.unmodifiableList(List.copyOf(availableOptions))`) para que ninguna capa externa pueda alterar las opciones de la alerta una vez creada.
+
+### 7.4. `OperatorDecisionRecord` (Validación y Normalización de la Decisión del Operador)
+* **Archivo**: [OperatorDecisionRecord.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/domain/model/OperatorDecisionRecord.java#L10-L31) (En `action_dispatcher`).
+* **¿Qué valida su constructor compacto?**:
+  1. Exige nulidad cero en `alertId`, `sensorId`, `chosenAction`, `operatorId` y `timestamp`.
+  2. Verifica que `chosenAction` no esté en blanco y la normaliza automáticamente a mayúsculas (`chosenAction = chosenAction.trim().toUpperCase()`).
+  3. Si `notes` llega `null`, la convierte de forma segura a cadena vacía `""` para evitar `NullPointerException` al guardar en PostgreSQL.
+
+### 7.5. `ShutdownCommand` y `DetectionResult` (Validación de Comandos Críticos y Resultados de Estrategia)
+* **Archivos**:
+  * [ShutdownCommand.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/domain/model/ShutdownCommand.java#L7-L21) (En `action_dispatcher` y `actuator_worker`): Valida en su constructor compacto que ninguna orden de apagado de emergencia pueda crearse sin `commandId`, `sensorId`, `reason`, `initiatedBy` e `issuedAt`.
+  * [DetectionResult.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/strategy/DetectionResult.java#L7-L28) (En `alert_detector`): Valida que el resultado devuelto por cualquier estrategia (`RuleBasedThresholdStrategy` o `ExponentialMovingAverageStrategy`) tenga siempre una `severity` y una `explanation` no nulas, exponiendo además *Factory Methods* semánticos (`DetectionResult.normal(...)`, `DetectionResult.warning(...)`, `DetectionResult.critical(...)`).
+
+
