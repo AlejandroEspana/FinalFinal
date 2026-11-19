@@ -246,4 +246,75 @@ Aquí están los **6 `record` principales con validaciones de negocio** que pued
   * [ShutdownCommand.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/domain/model/ShutdownCommand.java#L7-L21) (En `action_dispatcher` y `actuator_worker`): Valida en su constructor compacto que ninguna orden de apagado de emergencia pueda crearse sin `commandId`, `sensorId`, `reason`, `initiatedBy` e `issuedAt`.
   * [DetectionResult.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/domain/model/strategy/DetectionResult.java#L7-L28) (En `alert_detector`): Valida que el resultado devuelto por cualquier estrategia (`RuleBasedThresholdStrategy` o `ExponentialMovingAverageStrategy`) tenga siempre una `severity` y una `explanation` no nulas, exponiendo además *Factory Methods* semánticos (`DetectionResult.normal(...)`, `DetectionResult.warning(...)`, `DetectionResult.critical(...)`).
 
+---
+
+## 8. ¿Dónde se Crean los Brokers (Kafka y RabbitMQ), los Exchanges/Colas y las Suscripciones?
+
+### 8.1. ¿Dónde se crean los Brokers de Infraestructura?
+1. **Apache Kafka y Zookeeper**:
+   * Se crean como contenedores (`iot_zookeeper` e `iot_kafka`) en [docker-compose.yml](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L28-L73).
+   * En las líneas 59-60 de `docker-compose.yml` se configuran **`KAFKA_NUM_PARTITIONS: 3`** y **`KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"`**, lo que hace que el broker cree automáticamente los tópicos `sensor_data`, `alerts_critical` y `alerts_warning` con **3 particiones** cada uno.
+2. **RabbitMQ + Plugin `rabbitmq_delayed_message_exchange`**:
+   * La imagen del broker se construye en [docker/rabbitmq/Dockerfile](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker/rabbitmq/Dockerfile), donde se descarga el archivo `.ez` oficial de **`rabbitmq_delayed_message_exchange-3.13.0.ez`** y se activa con `rabbitmq-plugins enable --offline rabbitmq_delayed_message_exchange`.
+   * El contenedor `iot_rabbitmq` se levanta en [docker-compose.yml](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L74-L98).
+
+### 8.2. ¿Dónde se crean las Fábricas de Conexión, Exchanges, Colas y Bindings en Java?
+En los archivos **`BeanConfig.java`** de cada microservicio:
+* **Fábricas de Productores y Consumidores de Kafka (`ProducerFactory`, `KafkaTemplate`, `ConsumerFactory`, `ConcurrentKafkaListenerContainerFactory`)**:
+  * En `sensor_producer`: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/sensor_producer/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L31-L45)
+  * En `alert_detector`: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L44-L76)
+  * En `alert_router`: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L45-L62)
+  * En `plant_monitor_backend`: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/plant_monitor_backend/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L53-L70)
+* **Exchanges, Colas (`Queue`) y Enlaces (`Binding`) de RabbitMQ**:
+  * En `alert_router`: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L40-L43) crea el `FanoutExchange("human_alerts", true, false)`.
+  * En `operator_console_backend`: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/operator_console_backend/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L50-L63) crea la cola `operator_console_alerts_queue`, el `FanoutExchange("human_alerts")` y la **suscripción a nivel de broker (`BindingBuilder.bind(operatorAlertsQueue).to(humanAlertsExchange)`)**.
+  * En `action_dispatcher`: [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L33-L56) crea las colas `critical_actions_queue` y `maintenance_queue`, crea el **`CustomExchange("delayed_actions_exchange", "x-delayed-message")`** con `"x-delayed-type": "direct"`, y enlaza (`Binding`) ese exchange con `maintenance_queue` mediante la routing key `maintenance_route`.
+  * En `actuator_worker` y `maintenance_worker`: Sus respectivos [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/actuator_worker/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L24-L27) y [BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/maintenance_worker/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L24-L27) declaran de forma idempotente las colas `critical_actions_queue` y `maintenance_queue`.
+
+### 8.3. ¿Dónde se hace la Suscripción (Consumo Reactivo de Mensajes) en el Código?
+* **Suscripciones a Apache Kafka (`@KafkaListener`)**:
+  1. `alert_detector`: [KafkaSensorTelemetryConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_detector/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/KafkaSensorTelemetryConsumerAdapter.java#L30-L34) (`@KafkaListener(topics = "sensor_data", groupId = "alert-detector-group")`).
+  2. `plant_monitor_backend`: [KafkaPlantConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/plant_monitor_backend/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/KafkaPlantConsumerAdapter.java) (`@KafkaListener` sobre `sensor_data`, `alerts_critical` y `alerts_warning` con `groupId = "plant-monitor-group"`).
+  3. `alert_router`: [KafkaAlertBridgeConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/KafkaAlertBridgeConsumerAdapter.java) (`@KafkaListener(topics = {"alerts_critical", "alerts_warning"}, groupId = "alert-router-group")`).
+* **Suscripciones a RabbitMQ (`@RabbitListener`)**:
+  1. `operator_console_backend`: [RabbitMQHumanAlertConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/operator_console_backend/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQHumanAlertConsumerAdapter.java) (`@RabbitListener(queues = "${app.rabbitmq.queues.operator-alerts}")`).
+  2. `actuator_worker` (2 réplicas): [RabbitMQCriticalActionConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/actuator_worker/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQCriticalActionConsumerAdapter.java) (`@RabbitListener(queues = "${app.rabbitmq.queues.critical-actions}")`).
+  3. `maintenance_worker` (2 réplicas): [RabbitMQMaintenanceConsumerAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/maintenance_worker/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQMaintenanceConsumerAdapter.java) (`@RabbitListener(queues = "${app.rabbitmq.queues.maintenance}")`).
+
+---
+
+## 9. ¿Qué es un Exchange en RabbitMQ y Qué Tipos de Exchange Implementamos?
+
+En el protocolo **AMQP 0-9-1 de RabbitMQ**, un productor **nunca envía un mensaje directamente a una cola**. Siempre lo envía a un **Exchange (Intercambiador / Conmutador de Mensajes)**. El Exchange recibe el mensaje y, dependiendo de su **tipo** y de las reglas de enlace (**Bindings** y **Routing Keys**), decide a qué cola o colas entregarlo.
+
+En nuestro proyecto implementamos **3 tipos de Exchange**:
+
+1. **Fanout Exchange (`human_alerts`) — Difusión o Broadcast**:
+   * **¿Qué es?**: Es un exchange que **ignora la routing key** y envía una copia idéntica del mensaje a **todas las colas que estén vinculadas (`bound`) a él**.
+   * **¿Dónde lo implementamos?**: En `alert_router` ([BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L41) y [RabbitMQHumanAlertPublisherAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/alert_router/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQHumanAlertPublisherAdapter.java#L72)) y en `operator_console_backend` ([BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/operator_console_backend/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L51-L63)). Permite que cuando se detecta una alerta, se difunda inmediatamente a la consola del operador (y a cualquier otro sistema de monitoreo futuro que se suscriba al Fanout).
+2. **Direct Exchange (Default Direct `""` de AMQP) — Enrutamiento Exacto Punto a Punto**:
+   * **¿Qué es?**: Entrega el mensaje únicamente a la cola cuyo nombre o *routing key* coincida exactamente con la clave indicada por el productor.
+   * **¿Dónde lo implementamos?**: En `action_dispatcher` ([RabbitMQActionCommandPublisherAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQActionCommandPublisherAdapter.java#L59-L72)) cuando el operador elige:
+     * `APAGADO_INMEDIATO` $\rightarrow$ `rabbitTemplate.convertAndSend("", "critical_actions_queue", json)` (va directo a las réplicas de `actuator_worker`).
+     * `PROGRAMAR_MANTENIMIENTO_AHORA` $\rightarrow$ `rabbitTemplate.convertAndSend("", "maintenance_queue", json)` (va directo y sin espera a las réplicas de `maintenance_worker`).
+3. **Delayed Message Exchange (`delayed_actions_exchange` de tipo `x-delayed-message` con `x-delayed-type: direct`) — Retardo Temporal en el Broker**:
+   * **¿Qué es?**: Es un tipo especial de Exchange provisto por el plugin oficial `rabbitmq_delayed_message_exchange`. Cuando recibe un mensaje con la cabecera **`x-delay: <milisegundos>`**, en lugar de entregarlo de inmediato a la cola, **lo retiene internamente en la base de datos Mnesia de RabbitMQ** durante ese tiempo y, al expirar el temporizador, lo enruta como un exchange `direct` hacia la cola vinculada.
+   * **¿Dónde lo implementamos?**: En `action_dispatcher` ([BeanConfig.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/config/BeanConfig.java#L43-L56) y [RabbitMQActionCommandPublisherAdapter.java](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/Backend/action_dispatcher/src/main/java/com/empresa/mantenimiento/infrastructure/adapter/RabbitMQActionCommandPublisherAdapter.java#L80-L94)). Cuando el operador elige `RECONOCER_Y_ESPERAR_24H`, se inyecta `props.setHeader("x-delay", 10000)` y se envía a `delayed_actions_exchange` con routing key `maintenance_route`; tras los 10 segundos de espera en RabbitMQ, el exchange libera la orden hacia `maintenance_queue`.
+
+---
+
+## 10. ¿Por Qué Configuramos Dos Redes Privadas Dedicadas en `docker-compose.yml` (`iot_brokers_net` e `iot_backend_net`)?
+
+El caso de estudio especifica en el punto 5: *"Coordinación de PostgreSQL, Kafka, Zookeeper y RabbitMQ con volúmenes y **redes privadas dedicadas**"*.
+
+Por ello, en [docker-compose.yml](file:///c:/Users/RealMix1/Desktop/TrabajoFinalPoo_SD_SO/docker-compose.yml#L345-L351) segmentamos la topología en **dos redes virtuales bridge independientes** aplicando el principio de **Defensa en Profundidad y Menor Privilegio de Red**:
+
+1. **`iot_brokers_net` (Red Privada de Brokers y Persistencia)**:
+   * Aquí viven los motores de datos y mensajería (`postgres`, `zookeeper`, `kafka`, `rabbitmq`) junto con los microservicios Java del backend que necesitan publicar o consumir de ellos.
+   * **Ventaja crítica de seguridad**: El contenedor público **`frontend_dashboard` (Nginx) NO está conectado a `iot_brokers_net`**. Por lo tanto, desde la capa pública frontal es imposible a nivel de red L2/L3 alcanzar a PostgreSQL (`:5432`), Kafka (`:29092`), Zookeeper (`:2181`) o RabbitMQ (`:5672`).
+2. **`iot_backend_net` (Red Privada de Aplicación / Backend HTTP y WebSockets)**:
+   * Conecta únicamente al Reverse Proxy **`frontend_dashboard` (Nginx)** con la capa de presentación REST/WebSocket de los microservicios Java.
+   * **Ventaja crítica de seguridad**: Ni PostgreSQL, ni Kafka, ni Zookeeper, ni RabbitMQ existen dentro de `iot_backend_net`, aislando por completo el plano de datos/brokers del plano de acceso web.
+
+
 

@@ -23,7 +23,7 @@ services:
           cpus: "0.50"
           memory: 512M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
@@ -40,7 +40,7 @@ services:
           cpus: "0.50"
           memory: 512M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -69,7 +69,7 @@ services:
           cpus: "1.00"
           memory: 768M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
 
   rabbitmq:
     build:
@@ -94,7 +94,7 @@ services:
           cpus: "0.50"
           memory: 512M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
 
   sensor_producer:
     build:
@@ -120,7 +120,8 @@ services:
           cpus: "0.50"
           memory: 384M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
+      - iot_backend_net
 
   alert_detector:
     build:
@@ -143,7 +144,8 @@ services:
           cpus: "0.50"
           memory: 512M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
+      - iot_backend_net
 
   alert_router:
     build:
@@ -177,7 +179,8 @@ services:
           cpus: "0.50"
           memory: 384M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
+      - iot_backend_net
 
   plant_monitor_backend:
     build:
@@ -200,7 +203,8 @@ services:
           cpus: "0.50"
           memory: 384M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
+      - iot_backend_net
 
   operator_console_backend:
     build:
@@ -228,7 +232,8 @@ services:
           cpus: "0.50"
           memory: 384M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
+      - iot_backend_net
 
   action_dispatcher:
     build:
@@ -268,7 +273,8 @@ services:
           cpus: "0.50"
           memory: 512M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
+      - iot_backend_net
 
   actuator_worker:
     build:
@@ -296,7 +302,8 @@ services:
           cpus: "0.50"
           memory: 384M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
+      - iot_backend_net
 
   maintenance_worker:
     build:
@@ -324,7 +331,8 @@ services:
           cpus: "0.50"
           memory: 384M
     networks:
-      - iot_industrial_net
+      - iot_brokers_net
+      - iot_backend_net
 
   frontend_dashboard:
     build:
@@ -346,10 +354,12 @@ services:
           cpus: "0.25"
           memory: 128M
     networks:
-      - iot_industrial_net
+      - iot_backend_net
 
 networks:
-  iot_industrial_net:
+  iot_brokers_net:
+    driver: bridge
+  iot_backend_net:
     driver: bridge
 
 volumes:
