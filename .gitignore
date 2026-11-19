@@ -1,4 +1,3 @@
-# Maven build artifacts
 **/target/
 pom.xml.tag
 pom.xml.releaseBackup
@@ -10,7 +9,6 @@ buildNumber.properties
 .mvn/timing.properties
 .mvn/wrapper/maven-wrapper.jar
 
-# IDEs & OS
 .idea/
 *.iml
 *.iws
@@ -23,11 +21,17 @@ buildNumber.properties
 Thumbs.db
 *.log
 
-# Claves SSH y credenciales (NUNCA subir a GitHub)
 *.pem
 *.ppk
 .env
 
-# Frontend Node / Vite build artifacts
 Frontend/node_modules/
 Frontend/dist/
+
+**/*.md
+!/README.md
+docs/INFORME_TECNICO_APA7_PLATAFORMA_MANTENIMIENTO_PREDICTIVO.md
+docs/GUION_EXPOSICION_SUSTENTACION.md
+docs/MANUAL_PRUEBAS_Y_VERIFICACION_VM_AWS.md
+docs/diagramas/*.md
+aws/*.md
